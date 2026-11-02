@@ -1,8 +1,11 @@
-"""Hold-to-scan hotkey monitors.
+"""Hold-to-scan and tap (edge-triggered) hotkey monitors.
 
 Windows: GetAsyncKeyState Ctrl+Shift (unchanged behavior).
 X11: pynput listener Ctrl+Shift (unchanged behavior).
 Wayland: evdev, hold a single key (default Right Ctrl, HOTKEY_KEY in .env).
+
+Tap monitors (map toggle) fire once per key press so they work while the
+game has focus — Tk bind_all / status-pill clicks do not on Wayland.
 """
 
 import ctypes
@@ -23,6 +26,21 @@ class HotkeyMonitor(Protocol):
     def stop(self) -> None: ...
 
     def is_held(self) -> bool: ...
+
+
+class TapHotkeyMonitor(Protocol):
+    """Edge-triggered: ``consume_press`` is True once per physical key press."""
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def consume_press(self) -> bool: ...
+
+
+_FKEY_VK: dict[str, int] = {
+    f"F{i}": 0x70 + (i - 1) for i in range(1, 13)
+}
 
 
 class WindowsCtrlShiftMonitor:
@@ -169,3 +187,119 @@ def get_hotkey_monitor() -> HotkeyMonitor:
     if backend == "wayland":
         return EvdevKeyMonitor(get_settings().hotkey_key)
     return PynputCtrlShiftMonitor()
+
+
+def tk_keysym_to_evdev(keysym: str) -> str:
+    """Map a Tk keysym like ``F8`` to an evdev name ``KEY_F8``."""
+    name = (keysym or "F8").strip().upper()
+    if name.startswith("KEY_"):
+        return name
+    return f"KEY_{name}"
+
+
+class EdgeFromHeld:
+    """Rising-edge wrapper around an ``is_held`` poller."""
+
+    def __init__(self, held_fn):
+        self._held_fn = held_fn
+        self._was_held = False
+
+    def consume_press(self) -> bool:
+        held = bool(self._held_fn())
+        pressed = held and not self._was_held
+        self._was_held = held
+        return pressed
+
+
+class WindowsVkTapMonitor:
+    """Single virtual-key tap via GetAsyncKeyState (works with game focused)."""
+
+    def __init__(self, vk: int):
+        self.vk = vk
+        self._edge = EdgeFromHeld(self._is_held)
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def _is_held(self) -> bool:
+        try:
+            return bool(ctypes.windll.user32.GetAsyncKeyState(self.vk) & 0x8000)
+        except (AttributeError, OSError):
+            return False
+
+    def consume_press(self) -> bool:
+        return self._edge.consume_press()
+
+
+class PynputKeyTapMonitor:
+    """Count key presses from a pynput listener (X11)."""
+
+    def __init__(self, keysym: str):
+        self.keysym = keysym.strip().upper()
+        self._listener = None
+        self._pending = 0
+
+    def start(self) -> None:
+        if self._listener is not None:
+            return
+        from pynput import keyboard
+
+        target = self.keysym
+
+        def on_press(key):
+            name = None
+            if hasattr(key, "name") and key.name:
+                name = key.name.upper()
+            elif hasattr(key, "char") and key.char:
+                name = key.char.upper()
+            if name in {target, f"KEY_{target}"}:
+                self._pending += 1
+
+        self._listener = keyboard.Listener(on_press=on_press)
+        self._listener.start()
+
+    def stop(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+        self._pending = 0
+
+    def consume_press(self) -> bool:
+        if self._pending <= 0:
+            return False
+        self._pending -= 1
+        return True
+
+
+class EvdevKeyTapMonitor:
+    """Evdev rising-edge tap (Wayland — works with game focused)."""
+
+    def __init__(self, key_name: str):
+        self._held = EvdevKeyMonitor(key_name)
+        self._edge = EdgeFromHeld(self._held.is_held)
+
+    def start(self) -> None:
+        self._held.start()
+
+    def stop(self) -> None:
+        self._held.stop()
+
+    def consume_press(self) -> bool:
+        return self._edge.consume_press()
+
+
+def get_map_tap_monitor() -> TapHotkeyMonitor:
+    """Global map-toggle tap monitor for the configured ``MAP_HOTKEY``."""
+    keysym = get_settings().map_hotkey
+    if sys.platform == "win32":
+        vk = _FKEY_VK.get(keysym.strip().upper(), 0x77)  # default F8
+        return WindowsVkTapMonitor(vk)
+    backend = choose_backend_name(
+        sys.platform, os.environ, get_settings().screen_backend
+    )
+    if backend == "wayland":
+        return EvdevKeyTapMonitor(tk_keysym_to_evdev(keysym))
+    return PynputKeyTapMonitor(keysym)

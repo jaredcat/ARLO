@@ -165,6 +165,49 @@ def test_filter_outpost_room_expansion_independent_of_outpost_level():
     assert out.action == item.action
 
 
+def test_wiki_outpost_project_cleared_by_outpost_workshop_level():
+    """Wiki Projects: Outpost (mats) is Sheltered Retreat; done at outpost lvl ≥2."""
+    profile = ProgressProfile(workshop_levels={"outpost": 3, "outpost room": 2})
+    item = Item(
+        name="ARC Alloy",
+        action="Keep",
+        keep_for=(
+            "Projects: Expedition 1 (80x), Outpost (10x); "
+            "Research: Rascal Blueprint (15x)"
+        ),
+    )
+    out = apply_progress(item, profile)
+    assert "Outpost (10x)" not in (out.keep_for or "")
+    assert "Expedition 1 (80x)" in (out.keep_for or "")
+    assert "Rascal Blueprint" in (out.keep_for or "")
+
+
+def test_wiki_outpost_project_cleared_via_sheltered_retreat_progress():
+    profile = ProgressProfile(
+        project_items={
+            "sheltered retreat": {"arc-alloy": "COMPLETED"},
+        }
+    )
+    item = Item(
+        name="ARC Alloy",
+        action="Keep",
+        keep_for="Projects: Outpost (10x)",
+    )
+    out = apply_progress(item, profile)
+    assert not (out.keep_for or "").strip()
+
+
+def test_wiki_outpost_still_needed_below_stage_level():
+    profile = ProgressProfile(workshop_levels={"outpost": 1})
+    item = Item(
+        name="ARC Alloy",
+        action="Keep",
+        keep_for="Projects: Outpost (10x)",
+    )
+    out = apply_progress(item, profile)
+    assert "Outpost (10x)" in (out.keep_for or "")
+
+
 def test_filter_project_item_completed():
     profile = import_account_sync(FIXTURE)
     item = Item(

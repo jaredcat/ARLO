@@ -18,7 +18,10 @@ A screen overlay tool for [Arc Raiders](https://store.steampowered.com/app/20737
 - **Merge mode** - New items are added without overwriting your manual action overrides
 - **Hybrid catalog sync** - MetaForge for items/quests; wiki for workshop/projects/traders (see docs/ITEMS.md)
 - **Player progress import** - One-click MetaForge bookmarklet filters finished quests / workshop / projects from keep recommendations
+- **In-game map pins** - Open the raid MAP and ARLO draws filtered Metaforge pins over the terrain (click-through); **F8** opens search/filters, **F9** filters to the last hovered item
 - **GitHub Actions** - Optional scheduled workflow that auto-updates the database weekly
+
+Map data and basemap tiles are cached locally from Metaforge (attribution: [metaforge.app/arc-raiders](https://metaforge.app/arc-raiders)). See [docs/MAP.md](docs/MAP.md).
 
 ---
 
@@ -28,6 +31,8 @@ The tool runs two detection phases while you play:
 
 1. **Trigger Detection** (every 500ms) - Scans for the word "INVENTORY" on screen to know when your inventory is open
 2. **Tooltip Detection** (every 300ms) - When inventory is open, captures the area around your cursor, reads the item name via OCR, looks it up in the database, and shows an overlay
+
+When the raid **MAP** is open, ARLO registers the zoomed/panned viewport to a cached Metaforge basemap and projects your search/filter pins onto the game (same capture stack as tooltips). **F8** configures search/categories without leaving the idea of playing on the in-game map.
 
 The overlay popup displays:
 
@@ -182,6 +187,9 @@ uv run python update_db.py                # Hybrid update (MetaForge + wiki)
 uv run python update_db.py --merge        # Keep your manual overrides
 uv run python update_db.py --dry-run      # Preview changes without writing
 uv run python update_db.py --source wiki  # Wiki-only (no MetaForge)
+uv run python update_db.py --maps-only    # Refresh map markers (+ basemaps if MANIFEST outdated)
+uv run python update_db.py --maps-only --force-map-assets  # Re-stitch all basemap PNGs
+uv run python update_db.py --skip-maps    # Item/quest update without map sync
 ```
 
 

@@ -248,11 +248,11 @@ def save_progress(profile: ProgressProfile, path: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 _SECTION_SPLIT = re.compile(
-    r"(?=(?:Workshop|Quests|Projects|Research):)",
+    r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)",
     re.IGNORECASE,
 )
 _SECTION_HEAD = re.compile(
-    r"^(Workshop|Quests|Projects|Research):\s*(.*)$",
+    r"^(Workshop|Quests|Projects|Research|Amplify):\s*(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 # "Medical Lab 3 (8x)" / "Doctor's Orders (2x)" / "Trophy Display (10x)"
@@ -266,7 +266,7 @@ _WORKSHOP_ENTRY_RE = re.compile(
 
 _PROGRESS_KEEP_RE = re.compile(
     r"quests?|projects?|workshop|upgrade|expedition|scrappy|"
-    r"research\s*:|research\s+station|"
+    r"research\s*:|research\s+station|amplify\s*:|"
     r"flickering\s+flames|\bstage\b",
     re.IGNORECASE,
 )
@@ -418,7 +418,66 @@ def _merge_project_item_state(prev: str, state: str) -> str:
 def _project_names_match(label: str, project_name: str) -> bool:
     a = _norm_name(label)
     b = _norm_name(project_name)
-    return a == b or a.startswith(b + " ") or b.startswith(a + " ")
+    if a == b or a.startswith(b + " ") or b.startswith(a + " "):
+        return True
+    # Wiki "Outpost" ↔ MetaForge "Sheltered Retreat"
+    return bool(set(_project_lookup_keys(label)) & set(_project_lookup_keys(project_name)))
+
+
+# Wiki item Uses call the hideout unlock project "Outpost"; MetaForge account-sync
+# tracks the same work as "Sheltered Retreat" (Phase 2 = building mats).
+_PROJECT_ALIASES: dict[str, tuple[str, ...]] = {
+    "outpost": ("sheltered retreat",),
+    "sheltered retreat": ("outpost",),
+}
+
+_OUTPOST_PROJECT_RE = re.compile(r"^outpost(?:\s+(\d+))?$", re.IGNORECASE)
+_SHELTERED_PROJECT_RE = re.compile(
+    r"^sheltered retreat(?:\s+(\d+))?$", re.IGNORECASE
+)
+
+
+def _project_lookup_keys(project_label: str) -> list[str]:
+    """Normalized project keys including Outpost / Sheltered Retreat aliases."""
+    project = _norm_name(project_label)
+    base = re.sub(r"\s+\d+$", "", project).strip()
+    keys: list[str] = []
+    for cand in (project, base):
+        if not cand:
+            continue
+        if cand not in keys:
+            keys.append(cand)
+        for alias in _PROJECT_ALIASES.get(cand, ()):
+            if alias not in keys:
+                keys.append(alias)
+    return keys
+
+
+def _outpost_workshop_stage_done(
+    profile: ProgressProfile, project_label: str
+) -> bool | None:
+    """Map wiki ``Projects: Outpost [N]`` to ``workshop.levels.outpost``.
+
+    Room expansions (``Outpost Room N``) are separate and return ``None``.
+    Bare ``Outpost`` is treated as stage 2 (Gather Building Materials / mats).
+    """
+    text = _norm_name(project_label)
+    if text.startswith("outpost room"):
+        return None
+    stage: int | None = None
+    m = _OUTPOST_PROJECT_RE.match(text)
+    if m:
+        stage = int(m.group(1)) if m.group(1) else 2
+    else:
+        m2 = _SHELTERED_PROJECT_RE.match(text)
+        if m2:
+            stage = int(m2.group(1)) if m2.group(1) else 2
+    if stage is None:
+        return None
+    current = profile.workshop_levels.get("outpost")
+    if current is None:
+        return None
+    return current >= stage
 
 
 def _project_clause_done(
@@ -429,25 +488,45 @@ def _project_clause_done(
     project_catalog: ProjectCatalog | None = None,
 ) -> bool:
     """True when this project clause no longer applies for ``item_name``."""
-    project = _norm_name(project_label)
-    bucket = profile.project_items.get(project)
+    bucket: dict[str, str] | None = None
+    for key in _project_lookup_keys(project_label):
+        found = profile.project_items.get(key)
+        if found:
+            bucket = found
+            break
     if not bucket:
         # Match "Expedition 1" / "Trophy Display 2" labels to a bare project
         # bucket ("expedition" / "trophy display") and the reverse.
+        candidates = set(_project_lookup_keys(project_label))
         for key, value in profile.project_items.items():
-            if (
-                key == project
-                or key.startswith(project + " ")
-                or project.startswith(key + " ")
-            ):
+            if key in candidates:
                 bucket = value
                 break
-    if not bucket:
-        return False  # fail open — no mapped progress for this project
+            for cand in candidates:
+                if key.startswith(cand + " ") or cand.startswith(key + " "):
+                    bucket = value
+                    break
+            if bucket:
+                break
 
     item_slug = slugify(item_name)
-    if item_slug in bucket:
-        return bucket[item_slug] == "COMPLETED"
+    if bucket and item_slug in bucket:
+        state = bucket[item_slug]
+        if state == "COMPLETED":
+            return True
+        if state == "IN_PROGRESS":
+            return False
+
+    # Hideout Outpost level also covers wiki "Projects: Outpost" mats once
+    # the matching workshop tier is unlocked (prereq for room expansions).
+    ws_done = _outpost_workshop_stage_done(profile, project_label)
+    if ws_done is True:
+        return True
+    if ws_done is False:
+        return False
+
+    if not bucket:
+        return False  # fail open — no mapped progress for this project
 
     # Future stages often have no mappedProgress row yet (e.g. Mask Fragment
     # on Soul's Offering part 3 while parts 1–2 are done). If the catalog still
@@ -506,7 +585,7 @@ def _needed_from_entries(
     quest = sum(qty for _, qty in kept_by_kind.get("Quests", []))
     other = sum(
         qty
-        for kind in ("Workshop", "Projects", "Research")
+        for kind in ("Workshop", "Projects", "Research", "Amplify")
         for _, qty in kept_by_kind.get(kind, [])
     )
     return (quest if quest > 0 else None, other if other > 0 else None)
@@ -522,15 +601,18 @@ def _needed_from_keep_for(keep_for: str) -> tuple[int | None, int | None]:
         head = _SECTION_HEAD.match(chunk.strip().strip(";").strip())
         if not head:
             continue
-        kind = head.group(1).capitalize()
-        if kind.lower() == "quests":
+        kind_raw = head.group(1)
+        kind_l = kind_raw.lower()
+        if kind_l == "quests":
             kind = "Quests"
-        elif kind.lower() == "workshop":
+        elif kind_l == "workshop":
             kind = "Workshop"
-        elif kind.lower() == "projects":
+        elif kind_l == "projects":
             kind = "Projects"
-        elif kind.lower() == "research":
+        elif kind_l == "research":
             kind = "Research"
+        elif kind_l == "amplify":
+            kind = "Amplify"
         else:
             continue
         entries = _parse_entries(head.group(2))
@@ -574,15 +656,19 @@ def _filter_keep_for(
             if bit:
                 preamble.append(bit)
             continue
-        kind = head.group(1).capitalize()
-        if kind.lower() == "quests":
+        kind_l = head.group(1).lower()
+        if kind_l == "quests":
             kind = "Quests"
-        elif kind.lower() == "workshop":
+        elif kind_l == "workshop":
             kind = "Workshop"
-        elif kind.lower() == "projects":
+        elif kind_l == "projects":
             kind = "Projects"
-        elif kind.lower() == "research":
+        elif kind_l == "research":
             kind = "Research"
+        elif kind_l == "amplify":
+            kind = "Amplify"
+        else:
+            continue
 
         entries = _parse_entries(head.group(2))
         if kind == "Quests":
@@ -614,6 +700,7 @@ def _filter_keep_for(
                         project_catalog=project_catalog,
                     ):
                         continue
+                # Amplify: fail open (no account-sync for applied amp nodes yet)
                 kept.append((label, qty))
         if kept:
             kept_by_kind.setdefault(kind, []).extend(kept)
@@ -635,7 +722,7 @@ def _filter_keep_for(
             kept_by_kind["Quests"] = kept + kept_by_kind.get("Quests", [])
 
     rebuilt: list[str] = []
-    for kind in ("Quests", "Workshop", "Projects", "Research"):
+    for kind in ("Quests", "Workshop", "Projects", "Research", "Amplify"):
         entries = kept_by_kind.get(kind)
         if entries:
             rebuilt.append(f"{kind}: {_format_entries(entries)}")

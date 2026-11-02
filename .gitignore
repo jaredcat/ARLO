@@ -19,3 +19,6 @@ dist
 account-sync.json
 diag_frame.png
 data/missing_items.csv
+# Intermediate Metaforge tile caches — stitched reference.png is committed
+data/maps/**/tiles_z*/
+data/map_sync_samples/

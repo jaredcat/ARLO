@@ -20,6 +20,7 @@ dependencies = [
     # Wayland capture (portal/PipeWire). Always on Linux so plain `uv sync` /
     # `uv run` is enough — no repeated `uv sync --extra wayland`.
     "pygobject>=3.50; sys_platform == 'linux'",
+    "opencv-python-headless>=5.0.0.93",
 ]
 
 [project.optional-dependencies]

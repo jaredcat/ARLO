@@ -55,6 +55,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         "Research: ",
         text,
     )
+    text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
     return text
 
 
@@ -94,7 +95,7 @@ def _using_wayland() -> bool:
         from .screen import get_backend
 
         return get_backend().name == "wayland"
-    except Exception:  # noqa: BLE001 - overlay must still construct
+    except Exception:  # ruff: ignore[blind-except] - overlay must still construct
         return False
 
 
@@ -410,9 +411,16 @@ class OverlayWindow:
 class StatusWindow:
     """Small status indicator showing scanner state."""
 
-    def __init__(self, root: tk.Tk, *, on_quit: Callable[[], None] | None = None):
+    def __init__(
+        self,
+        root: tk.Tk,
+        *,
+        on_quit: Callable[[], None] | None = None,
+        on_left_click: Callable[[], None] | None = None,
+    ):
         self.root = root
         self.on_quit = on_quit
+        self.on_left_click = on_left_click
         self.dpi_scale = get_dpi_scale()
 
         self.window = tk.Toplevel(root)
@@ -422,7 +430,9 @@ class StatusWindow:
         self.window.overrideredirect(boolean=True)
         self.window.geometry("+10+10")
         if on_quit:
-            self.window.bind("<Button-3>", lambda e: on_quit())  # Right-click to quit
+            self.window.bind("<Button-3>", lambda _e: on_quit())  # Right-click to quit
+        if on_left_click:
+            self.window.bind("<Button-1>", lambda _e: on_left_click())
 
         self._setup_ui()
 
@@ -446,14 +456,21 @@ class StatusWindow:
         )
         self.status_label.pack()
         if self.on_quit:
-            self.status_label.bind("<Button-3>", lambda e: self.on_quit())
-            self.frame.bind("<Button-3>", lambda e: self.on_quit())
+            self.status_label.bind("<Button-3>", lambda _e: self.on_quit())
+            self.frame.bind("<Button-3>", lambda _e: self.on_quit())
+        if self.on_left_click:
+            self.status_label.bind("<Button-1>", lambda _e: self.on_left_click())
+            self.frame.bind("<Button-1>", lambda _e: self.on_left_click())
 
     def set_scanning(self) -> None:
-        self.status_label.config(text="\u25cf Scanning...", fg="#888888")
+        self.status_label.config(text="\u25cf Scanning... (F8=filters)", fg="#888888")
 
     def set_active(self) -> None:
         self.status_label.config(text="\u25cf INVENTORY", fg="#32CD32")
+
+    def set_map(self) -> None:
+        """Raid map screen is open — inventory scan suppressed; pins overlay."""
+        self.status_label.config(text="\u25cf MAP (F8=filters)", fg="#2DD4BF")
 
     def set_hotkey(self) -> None:
         self.status_label.config(text="\u25cf HOTKEY SCAN", fg="#FFD700")

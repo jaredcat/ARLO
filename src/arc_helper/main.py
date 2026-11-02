@@ -9,6 +9,7 @@ import threading
 import time
 import tkinter as tk
 import traceback
+from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
@@ -29,7 +30,20 @@ from arc_helper.database import Item
 from arc_helper.database import get_database
 from arc_helper.database import names_match
 from arc_helper.hotkey import HotkeyMonitor
+from arc_helper.hotkey import TapHotkeyMonitor
 from arc_helper.hotkey import get_hotkey_monitor
+from arc_helper.hotkey import get_map_tap_monitor
+from arc_helper.map_data import get_map_catalog
+from arc_helper.map_filter import MapFilterState
+from arc_helper.map_filter import resolve_markers
+from arc_helper.map_overlay import MapWindow
+from arc_helper.map_pins_overlay import InGameMapPins
+from arc_helper.map_pins_overlay import OverlayPin
+from arc_helper.map_sync import MapSyncEngine
+from arc_helper.map_sync import ViewportRegistration
+from arc_helper.map_sync import capture_map_thumb
+from arc_helper.map_sync import latlng_to_screen
+from arc_helper.map_sync import thumbs_differ
 from arc_helper.ocr import OCREngineManager
 from arc_helper.ocr import get_ocr_engine
 from arc_helper.overlay import OverlayWindow
@@ -209,7 +223,7 @@ class Scanner:
         settings = get_settings()
         ocr = get_ocr_engine()
 
-        while self._running:
+        while self._running:  # ruff: ignore[too-many-nested-blocks]
             try:
                 if self.state == ScannerState.PAUSED:
                     time.sleep(0.1)
@@ -223,6 +237,16 @@ class Scanner:
 
                 # Phase 1: Check for trigger (INVENTORY) or hotkey
                 if self.state == ScannerState.IDLE:
+                    # MAP screen still shows the INVENTORY tab label in the top
+                    # nav — suppress inventory scan when map chrome is visible.
+                    if MapSyncEngine.detect_map_open():
+                        self._update_status("map")
+                        self.ui_queue.put(("map_mode", True))
+                        time.sleep(settings.scan.trigger_scan_interval)
+                        self.stats.trigger_scans += 1
+                        continue
+
+                    self.ui_queue.put(("map_mode", False))
                     self._update_status("scanning")
 
                     if hotkey_now:
@@ -256,15 +280,22 @@ class Scanner:
                             self._enter_idle("Hotkey released - returning to idle")
                             continue
                     else:
-                        # Inventory mode: check trigger every 3rd scan
+                        # Inventory mode: leave if MAP opens or INVENTORY closes
                         self._trigger_check_counter += 1
                         should_check_trigger = self._trigger_check_counter % 3 == 0
 
-                        if should_check_trigger and self._inventory_closed(
-                            ocr, settings
-                        ):
-                            self._enter_idle("INVENTORY closed - returning to idle")
-                            continue
+                        if should_check_trigger:
+                            if MapSyncEngine.detect_map_open():
+                                self._enter_idle(
+                                    "MAP screen open - leaving inventory scan"
+                                )
+                                self.ui_queue.put(("map_mode", True))
+                                continue
+                            if self._inventory_closed(ocr, settings):
+                                self._enter_idle(
+                                    "INVENTORY closed - returning to idle"
+                                )
+                                continue
 
                     # Scan tooltip at cursor position
                     item_name = ocr.extract_item_name_at_cursor()
@@ -437,9 +468,41 @@ class Application:
         self.root = tk.Tk()
         self.root.withdraw()  # Hide main window
 
-        # Create overlay and status windows
+        # Tooltip overlay + in-game map pins. F8 opens filter config
+        # (evdev/GetAsyncKeyState works with the game focused on Wayland).
         self.overlay = OverlayWindow(self.root)
-        self.status = StatusWindow(self.root, on_quit=self.quit)
+        self.map_catalog = get_map_catalog()
+        self.map_sync = MapSyncEngine(self.map_catalog)
+        self.map_filter = MapFilterState()
+        self.map_pins = InGameMapPins(self.root)
+        # Flags must exist before MapWindow init (reload fires on_filter_change).
+        self._last_overlay_item: str | None = None
+        self._map_mode_latched = False
+        self._map_pins_active = False
+        self._map_refresh_busy = False
+        self._map_motion_busy = False
+        self._map_motion_after_id: str | None = None
+        self._map_settle_after_id: str | None = None
+        self._map_thumb = None
+        self._map_pins_drawn_for_thumb = None
+        self._map_miss_streak = 0
+        self._map_motion_streak = 0
+        # Fast motion poll; ORB only after the viewport stops changing.
+        self._map_motion_poll_ms = 150
+        self._map_settle_ms = 400
+        self.map_window = MapWindow(
+            self.root,
+            catalog=self.map_catalog,
+            filter_state=self.map_filter,
+            on_sync_request=self._request_map_sync,
+            on_filter_change=self._on_map_filter_change,
+        )
+        self.map_tap: TapHotkeyMonitor = get_map_tap_monitor()
+        self.status = StatusWindow(
+            self.root,
+            on_quit=self.quit,
+            on_left_click=self._toggle_map_window,
+        )
 
         # Debug overlay for visualizing capture area (separate from debug_mode)
         self.debug_overlay = None
@@ -508,19 +571,265 @@ class Application:
             self.status.set_scanning()
         elif status == "active":
             self.status.set_active()
+        elif status == "map":
+            self.status.set_map()
         elif status == "hotkey":
             self.status.set_hotkey()
         elif status == "error":
             self.status.set_error("Error")
 
+    def _on_map_mode(self, *, active: bool) -> None:
+        """Enter/leave raid-map mode: in-game pins loop; F8 for filters."""
+        if active:
+            if not self._map_mode_latched:
+                self._map_mode_latched = True
+                self._map_pins_active = True
+                self._map_thumb = None
+                self._map_pins_drawn_for_thumb = None
+                self._map_motion_streak = 0
+                self.map_window.set_sync_status("watching")
+                self._schedule_map_motion_poll(immediate=True)
+            self.status.set_map()
+        else:
+            self._map_mode_latched = False
+            self._map_pins_active = False
+            self._map_miss_streak = 0
+            self._map_motion_streak = 0
+            self._map_thumb = None
+            self._map_pins_drawn_for_thumb = None
+            self._cancel_map_timers()
+            self.map_pins.hide()
+            self.map_window.set_sync_status("idle")
+
+    def _cancel_map_timers(self) -> None:
+        for attr in ("_map_motion_after_id", "_map_settle_after_id"):
+            aid = getattr(self, attr)
+            if aid is not None:
+                with suppress(tk.TclError):
+                    self.root.after_cancel(aid)
+                setattr(self, attr, None)
+
+    def _on_map_filter_change(self) -> None:
+        """Filters changed in F8 window — redraw pins if the map is settled."""
+        if not self._map_pins_active:
+            return
+        self._map_pins_drawn_for_thumb = None
+        self._schedule_map_settle()
+
+    def _schedule_map_motion_poll(self, *, immediate: bool = False) -> None:
+        if self._map_motion_after_id is not None:
+            with suppress(tk.TclError):
+                self.root.after_cancel(self._map_motion_after_id)
+            self._map_motion_after_id = None
+        if not self._map_pins_active:
+            return
+        delay = 0 if immediate else self._map_motion_poll_ms
+        self._map_motion_after_id = self.root.after(delay, self._poll_map_motion)
+
+    def _poll_map_motion(self) -> None:
+        """Fast viewport thumb check; hide on move, ORB only after settle."""
+        self._map_motion_after_id = None
+        if not self._map_pins_active:
+            return
+        if self._map_motion_busy or self._map_refresh_busy:
+            self._schedule_map_motion_poll()
+            return
+        self._map_motion_busy = True
+
+        def _worker() -> None:
+            try:
+                thumb = capture_map_thumb()
+                self.ui_queue.put(("map_thumb", thumb))
+            except Exception as e:  # ruff: ignore[blind-except]
+                logger.debug("Map motion poll failed: %s", e)
+                self.ui_queue.put(("map_thumb", None))
+            finally:
+                self._map_motion_busy = False
+
+        Thread(target=_worker, daemon=True, name="map-motion").start()
+
+    def _on_map_thumb(self, thumb) -> None:
+        if not self._map_pins_active:
+            return
+        from arc_helper.map_sync import MOTION_STREAK_REQUIRED
+
+        # First sample after map open — seed baseline, don't treat as a pan.
+        if self._map_thumb is None:
+            if thumb is not None:
+                self._map_thumb = thumb
+            self._map_motion_streak = 0
+            if (
+                self._map_pins_drawn_for_thumb is None
+                and self._map_settle_after_id is None
+                and not self._map_refresh_busy
+            ):
+                self._schedule_map_settle()
+            self._schedule_map_motion_poll()
+            return
+
+        moved = thumbs_differ(self._map_thumb, thumb)
+        if thumb is not None:
+            self._map_thumb = thumb
+
+        if moved:
+            self._map_motion_streak += 1
+        else:
+            self._map_motion_streak = 0
+
+        if self._map_motion_streak >= MOTION_STREAK_REQUIRED:
+            # Clear stale pins only after sustained pan/zoom, not hover flicker.
+            self.map_pins.hide()
+            self._map_pins_drawn_for_thumb = None
+            self.map_window.set_sync_status("moving…")
+            self._schedule_map_settle()
+            self._map_motion_streak = 0
+        elif (
+            self._map_pins_drawn_for_thumb is None
+            and self._map_settle_after_id is None
+            and not self._map_refresh_busy
+        ):
+            # Stable but nothing drawn yet (first open / failed ORB).
+            self._schedule_map_settle()
+
+        self._schedule_map_motion_poll()
+
+    def _schedule_map_settle(self) -> None:
+        """Debounce: wait until motion stops, then register + draw once."""
+        if self._map_settle_after_id is not None:
+            with suppress(tk.TclError):
+                self.root.after_cancel(self._map_settle_after_id)
+            self._map_settle_after_id = None
+        if not self._map_pins_active:
+            return
+        self._map_settle_after_id = self.root.after(
+            self._map_settle_ms, self._kick_map_pin_refresh
+        )
+
+    def _kick_map_pin_refresh(self) -> None:
+        """ORB registration + pin project once the viewport has settled."""
+        self._map_settle_after_id = None
+        if not self._map_pins_active:
+            return
+        if self._map_refresh_busy:
+            self._schedule_map_settle()
+            return
+        if (
+            self._map_pins_drawn_for_thumb is not None
+            and self._map_thumb is not None
+            and not thumbs_differ(self._map_pins_drawn_for_thumb, self._map_thumb)
+        ):
+            return
+
+        self._map_refresh_busy = True
+        self.map_window.set_sync_status("registering…")
+        # Tk vars must be read on the UI thread — not inside the worker.
+        self.map_window.push_filter_state()
+        hint = self.map_filter.map_id
+        filter_snap = self.map_filter.snapshot()
+
+        def _worker() -> None:
+            try:
+                reg = self.map_sync.register_once(
+                    map_id_hint=hint, detect_player=False
+                )
+                frame = self._build_pin_frame(reg, filter_snap)
+                self.ui_queue.put(("map_pins_frame", frame))
+            except Exception as e:  # ruff: ignore[blind-except]
+                logger.warning("Map pin refresh failed: %s", e)
+                self.ui_queue.put(("map_pins_frame", None))
+            finally:
+                self._map_refresh_busy = False
+
+        Thread(target=_worker, daemon=True, name="map-pins").start()
+
+    def _build_pin_frame(
+        self,
+        reg: ViewportRegistration | None,
+        state: MapFilterState | None = None,
+    ) -> dict | None:
+        """Project filtered markers into overlay coords for the UI thread."""
+        from arc_helper.map_filter import INGAME_PIN_CAP
+        from arc_helper.map_sync import viewport_center_latlng
+
+        if reg is None or not self.map_catalog:
+            return None
+        meta = self.map_catalog.get_meta(reg.map_id)
+        if meta is None:
+            return None
+
+        if state is None:
+            state = self.map_filter.snapshot()
+        else:
+            state = state.snapshot()
+        state.map_id = reg.map_id
+        # Keep shared filter map_id in sync with OCR/registration
+        if reg.map_id and reg.map_id != self.map_filter.map_id:
+            self.map_filter.map_id = reg.map_id
+
+        # Warm Metaforge loose-spawn cache (network) before projecting pins.
+        needle = (state.item_filter or state.search or "").strip()
+        if needle:
+            try:
+                self.map_catalog.ensure_loose_spots(reg.map_id, needle)
+            except Exception as e:  # ruff: ignore[blind-except]
+                logger.debug("Loose-spot ensure failed: %s", e)
+
+        # Prefer pins near the visible viewport — a global sample of 16 often
+        # lands entirely off-screen when the raid map is zoomed in.
+        origin = viewport_center_latlng(meta=meta, reg=reg)
+        # Over-fetch then keep only those that project into the crop.
+        candidates = resolve_markers(
+            self.map_catalog,
+            state,
+            origin=origin,
+            limit=max(INGAME_PIN_CAP * 32, 256),
+        )
+
+        left, top, _r, _b = reg.viewport_bbox
+        pins: list[OverlayPin] = []
+        for m in candidates:
+            screen = latlng_to_screen(m.lat, m.lng, meta=meta, reg=reg)
+            if screen is None:
+                continue
+            sx, sy = screen
+            pins.append(
+                OverlayPin(
+                    x=sx - left,
+                    y=sy - top,
+                    category=m.category,
+                )
+            )
+            if len(pins) >= INGAME_PIN_CAP:
+                break
+
+        logger.info(
+            "Map pins: %s on-screen / %s candidates (origin=%s)",
+            len(pins),
+            len(candidates),
+            "viewport" if origin else "none",
+        )
+        return {
+            "reg": reg,
+            "pins": pins,
+            "marker_count": len(pins),
+        }
+
     def _pump_ui_queue(self) -> None:
         """Drain scanner UI messages on the main thread, then reschedule."""
+        # Global map hotkey (works while the game has focus on Wayland/Windows)
+        try:
+            if self.map_tap.consume_press():
+                self._toggle_map_window()
+        except Exception as e:  # ruff: ignore[blind-except]
+            logger.warning("Map hotkey poll failed: %s", e)
+
         try:
             while True:
                 msg = self.ui_queue.get_nowait()
                 if msg[0] == "status":
                     self._apply_status(msg[1])
                 elif msg[0] == "overlay":
+                    self._last_overlay_item = msg[1]
                     self.overlay.show(msg[1], msg[2])
                 elif msg[0] == "overlay_keep":
                     self.overlay.keep_alive()
@@ -528,9 +837,81 @@ class Application:
                     self.overlay.hide()
                 elif msg[0] == "progress_imported":
                     self._apply_progress_profile(msg[1])
+                elif msg[0] == "map_pins_frame":
+                    self._apply_map_pins_frame(msg[1])
+                elif msg[0] == "map_thumb":
+                    self._on_map_thumb(msg[1])
+                elif msg[0] == "map_mode":
+                    self._on_map_mode(active=bool(msg[1]))
         except queue.Empty:
             pass
         self.root.after(50, self._pump_ui_queue)
+
+    def _request_map_sync(self) -> None:
+        """Manual Sync now from filter window — force a settled redraw."""
+        self._map_pins_drawn_for_thumb = None
+        self._schedule_map_settle()
+
+    def _apply_map_pins_frame(self, frame: dict | None) -> None:
+        if not self._map_pins_active:
+            self.map_pins.hide()
+            return
+        if frame is None:
+            self._map_miss_streak += 1
+            self.map_pins.hide()
+            # Remember this thumb so we don't re-ORB until the map moves again.
+            if self._map_thumb is not None:
+                self._map_pins_drawn_for_thumb = self._map_thumb.copy()
+            self.map_window.set_sync_status(
+                f"no match ({self._map_miss_streak})"
+                if self._map_miss_streak < 8
+                else "no match — pan slightly"
+            )
+            return
+
+        self._map_miss_streak = 0
+        reg: ViewportRegistration = frame["reg"]
+        pins: list[OverlayPin] = frame["pins"]
+        conf = reg.confidence
+        n = frame["marker_count"]
+        if self.map_pins.ingame_enabled:
+            status = f"live ({conf:.0%}, {n} pins)"
+        else:
+            status = f"live ({conf:.0%}, {n} — F8 only on Wayland)"
+        self.map_window.set_sync_status(status)
+
+        self.map_window.set_suspend_filter_notify(suspended=True)
+        try:
+            if reg.map_id and reg.map_id != self.map_window.current_map_id:
+                self.map_window.select_map(reg.map_id)
+        finally:
+            self.map_window.set_suspend_filter_notify(suspended=False)
+
+        self.map_pins.update(viewport_bbox=reg.viewport_bbox, pins=pins)
+        # Remember the thumb we drew for — skip re-ORB until it moves again.
+        if self._map_thumb is not None:
+            self._map_pins_drawn_for_thumb = self._map_thumb.copy()
+
+    def _toggle_map_window(self, _event: object = None) -> None:
+        was_visible = self.map_window.is_visible()
+        self.map_window.toggle()
+        if not was_visible:
+            logger.info("Map filters opened (%s)", self.map_window.current_map_id)
+        else:
+            logger.info("Map filters hidden")
+
+    def _find_last_item_on_map(self, _event: object = None) -> None:
+        name = self._last_overlay_item or self.scanner.stats.last_item
+        if not name:
+            self.status.set_info("Map: no item yet — hover one first")
+            self.root.after(2500, self.status.set_scanning)
+            return
+        self.map_window.find_item(name)
+        self.status.set_info(f"Map filter: {name}")
+        self.root.after(2500, self.status.set_scanning)
+        if self._map_pins_active:
+            self._map_pins_drawn_for_thumb = None
+            self._schedule_map_settle()
 
     def run(self) -> None:
         """Start the application."""
@@ -572,8 +953,28 @@ class Application:
             "Hold the hotkey to force tooltip scanning (Ctrl+Shift; "
             f"{get_settings().hotkey_key} on Wayland)"
         )
+        map_hk = get_settings().map_hotkey
+        find_hk = get_settings().map_find_hotkey
+        logger.info(
+            "Map: open raid MAP for in-game pins; %s = filters; "
+            "%s = filter to last hovered item",
+            map_hk,
+            find_hk,
+        )
+        if self.map_catalog:
+            logger.info(
+                "Map catalog: %s markers",
+                self.map_catalog.marker_count(),
+            )
+        else:
+            logger.info("Map catalog empty — run: uv run python update_db.py --maps-only")
         logger.info("Press Ctrl+C in terminal to quit")
         logger.info("=" * 50)
+
+        # Map filters hotkey: global tap (evdev/GetAsyncKeyState) + Tk when focused
+        self.map_tap.start()
+        self.root.bind_all(f"<{map_hk}>", self._toggle_map_window)
+        self.root.bind_all(f"<{find_hk}>", self._find_last_item_on_map)
 
         # Start scanner
         self.scanner.start()
@@ -597,8 +998,14 @@ class Application:
     def quit(self) -> None:
         """Clean shutdown."""
         logger.info("\nShutting down...")
+        self._map_pins_active = False
+        self._cancel_map_timers()
+        with suppress(Exception):
+            self.map_pins.hide()
         stop_import_server()
         self.scanner.stop()
+        with suppress(Exception):
+            self.map_tap.stop()
         from arc_helper.screen import reset_backend
 
         reset_backend()  # release the portal session / PipeWire stream

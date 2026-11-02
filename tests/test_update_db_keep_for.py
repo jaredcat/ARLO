@@ -340,3 +340,66 @@ def test_scrape_research_includes_unusable_weapon(monkeypatch):
     joined = " ".join(keep["unusable weapon"])
     assert "Medium Gun Parts Blueprint" in joined
     assert "Tether Launcher Blueprint" in joined
+
+
+def test_scrape_amplify_keep_map_fossilized_lightning_anvil(monkeypatch):
+    from update_db import apply_amplify_keep_map
+    from update_db import scrape_amplify_keep_map
+
+    amp_html = """
+    <div id="mw-content-text">
+      <table>
+        <tr><th>Icon</th><th>Name</th><th>Research</th>
+            <th>Description</th><th>Stats</th></tr>
+        <tr><td></td><td>X Rounds</td><td>Embedded Blast Engineering</td><td></td>
+            <td>Kettle Anvil +5 Base Damage Bettina +3 Base Damage</td></tr>
+        <tr><td></td><td>Incendiary Grenade</td><td>Compact Combustion Charges</td><td></td>
+            <td>Rascal Hullcracker +11.25/s Burn Damage</td></tr>
+      </table>
+    </div>
+    """
+    weapons_html = """
+    <div id="mw-content-text">
+      <h2>Hand Cannons</h2>
+      <table>
+        <tr><th>X-Rounds</th></tr>
+        <tr><td>Research:</td></tr>
+        <tr><td>Embedded Blast Engineering</td></tr>
+        <tr><td>Materials:</td></tr>
+        <tr><td>3</td></tr>
+        <tr><td>Fossilized Lightning</td></tr>
+        <tr><td>Conflicts:</td></tr>
+        <tr><td>Anvil Splitter</td></tr>
+      </table>
+      <table>
+        <tr><th>Incendiary Grenades</th></tr>
+        <tr><td>Materials:</td></tr>
+        <tr><td>3</td></tr>
+        <tr><td>Fossilized Lightning</td></tr>
+      </table>
+    </div>
+    """
+
+    def _fetch(title: str) -> str:
+        if title == "Amplification":
+            return amp_html
+        if title == "Amplified_Weapons":
+            return weapons_html
+        raise AssertionError(title)
+
+    monkeypatch.setattr("update_db.fetch_wiki_page", _fetch)
+    keep = scrape_amplify_keep_map()
+    assert "fossilized lightning" in keep
+    joined = " ".join(keep["fossilized lightning"])
+    assert "Anvil X-Rounds (3x)" in joined
+    assert "Kettle X-Rounds (3x)" in joined
+    assert "Hullcracker Incendiary Grenades (3x)" in joined
+
+    merged = apply_amplify_keep_map(
+        {"fossilized lightning": "Research: Deadline Blueprint (1x)"},
+        keep,
+    )
+    text = merged["fossilized lightning"]
+    assert text.startswith("Research:")
+    assert "Amplify:" in text
+    assert text.index("Research:") < text.index("Amplify:")

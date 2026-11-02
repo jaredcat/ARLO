@@ -796,7 +796,7 @@ def apply_workshop_keep_map(
         parts: list[str] = []
         if loot:
             for chunk in re.split(
-                r"(?=(?:Workshop|Quests|Projects|Research):)", loot
+                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", loot
             ):
                 chunk = chunk.strip().strip(";").strip()
                 if not chunk:
@@ -877,13 +877,196 @@ def apply_research_keep_map(
         parts: list[str] = []
         if existing:
             for chunk in re.split(
-                r"(?=(?:Workshop|Quests|Projects|Research):)", existing
+                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", existing
             ):
                 chunk = chunk.strip().strip(";").strip()
                 if not chunk or re.match(r"^Research:", chunk, re.IGNORECASE):
                     continue
                 parts.append(chunk)
         parts.append(research_line)
+        out[key] = "; ".join(parts)
+    return out
+
+
+# Longest-first so "Il Toro" / "Hullcracker" win over shorter tokens.
+_AMP_WEAPON_NAMES: tuple[str, ...] = tuple(
+    sorted(
+        {
+            "Anvil",
+            "Aphelion",
+            "Bettina",
+            "Burletta",
+            "Canto",
+            "Equalizer",
+            "Hairpin",
+            "Hullcracker",
+            "Il Toro",
+            "Jupiter",
+            "Kettle",
+            "Osprey",
+            "Rascal",
+            "Rattler",
+            "Renegade",
+            "Torrente",
+            "Venator",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _normalize_amp_node_key(name: str) -> str:
+    """Collapse ``X Rounds`` / ``X-Rounds`` / plural grenade labels."""
+    text = re.sub(r"[\s\-]+", " ", (name or "").strip().lower())
+    text = re.sub(r"\s+", " ", text)
+    if text.endswith("s") and text not in {"x rounds", "incendiary rounds"}:
+        # Incendiary Grenades → incendiary grenade
+        if text.endswith(" grenades"):
+            text = text[:-1]
+    return text
+
+
+def _amp_node_display(name: str) -> str:
+    """Prefer hyphenated X-Rounds style for overlay tips."""
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    if re.fullmatch(r"x[\s\-]*rounds", text, re.IGNORECASE):
+        return "X-Rounds"
+    if re.fullmatch(r"incendiary grenades?", text, re.IGNORECASE):
+        return "Incendiary Grenades"
+    return text
+
+
+def _weapons_from_amp_stats(stats: str) -> list[str]:
+    """Pull weapon names (order of appearance) from an Amplification Stats cell."""
+    text = stats or ""
+    hits: list[tuple[int, str]] = []
+    used_spans: list[tuple[int, int]] = []
+    for weapon in _AMP_WEAPON_NAMES:
+        for m in re.finditer(rf"\b{re.escape(weapon)}\b", text, re.IGNORECASE):
+            span = m.span()
+            if any(span[0] < e and span[1] > s for s, e in used_spans):
+                continue
+            hits.append((span[0], weapon))
+            used_spans.append(span)
+    hits.sort(key=lambda t: t[0])
+    # Preserve first-seen casing from the catalog list
+    return [w for _, w in hits]
+
+
+def scrape_amplification_node_weapons() -> dict[str, list[str]]:
+    """Wiki Amplification table: amp node → weapons it can apply to."""
+    html = fetch_wiki_page("Amplification")
+    soup = BeautifulSoup(html, "html.parser")
+    table = None
+    for candidate in soup.find_all("table"):
+        headers = [
+            th.get_text(strip=True).lower() for th in candidate.find_all("th")
+        ]
+        if "name" in headers and "stats" in headers:
+            table = candidate
+            break
+    if table is None:
+        return {}
+    out: dict[str, list[str]] = {}
+    for tr in table.find_all("tr")[1:]:
+        cells = [c.get_text(" ", strip=True) for c in tr.find_all("td")]
+        if len(cells) < 5:
+            continue
+        node = cells[1].strip()
+        weapons = _weapons_from_amp_stats(cells[4])
+        if not node or not weapons:
+            continue
+        out[_normalize_amp_node_key(node)] = weapons
+    return out
+
+
+def scrape_amplified_weapons_material_costs() -> list[tuple[str, str, int]]:
+    """Wiki Amplified Weapons tables → ``(node_display, material, qty)``."""
+    html = fetch_wiki_page("Amplified_Weapons")
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.select_one("#mw-content-text") or soup
+    rows: list[tuple[str, str, int]] = []
+    for table in root.find_all("table"):
+        text = table.get_text("\n", strip=True)
+        if "Materials:" not in text:
+            continue
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        if not lines:
+            continue
+        node = lines[0]
+        # Find Materials: then qty + item name on following lines
+        for i, line in enumerate(lines):
+            if not re.fullmatch(r"Materials?:", line, re.IGNORECASE):
+                continue
+            # Pattern A: "3" then "Fossilized Lightning"
+            if i + 2 < len(lines) and lines[i + 1].isdigit():
+                qty = int(lines[i + 1])
+                mat = lines[i + 2]
+                if mat and not re.fullmatch(
+                    r"(Research|Conflicts|Requires):?", mat, re.IGNORECASE
+                ):
+                    rows.append((_amp_node_display(node), mat, qty))
+                break
+            # Pattern B: "3× Fossilized Lightning" on one line
+            if i + 1 < len(lines):
+                parsed = _parse_wiki_item_quantities(lines[i + 1])
+                for mat, qty in parsed:
+                    rows.append((_amp_node_display(node), mat, qty))
+            break
+    return rows
+
+
+def scrape_amplify_keep_map() -> dict[str, list[str]]:
+    """Item → ``Weapon Node (Qx)`` amp apply costs from wiki amp pages."""
+    print("Scraping wiki Amplification / Amplified Weapons material costs...")
+    node_weapons = scrape_amplification_node_weapons()
+    costs = scrape_amplified_weapons_material_costs()
+    keep_map: dict[str, list[str]] = {}
+    pairs_n = 0
+    for node_display, mat, qty in costs:
+        key = _normalize_amp_node_key(node_display)
+        weapons = node_weapons.get(key) or []
+        labels = (
+            [f"{w} {node_display}" for w in weapons]
+            if weapons
+            else [node_display]
+        )
+        for label in labels:
+            keep_map.setdefault(mat.lower(), []).append(f"{label} ({qty}x)")
+            pairs_n += 1
+    for mat_key, entries in list(keep_map.items()):
+        keep_map[mat_key] = _dedupe_keep_entries(entries)
+    print(
+        f"  Amplify material costs: {pairs_n} node/weapon pairs, "
+        f"{len(keep_map)} materials"
+    )
+    return keep_map
+
+
+def apply_amplify_keep_map(
+    uses_map: dict[str, str],
+    amplify_map: dict[str, list[str]],
+) -> dict[str, str]:
+    """Merge ``Amplify:`` weapon-node costs after other keep sections."""
+    if not amplify_map:
+        return uses_map
+    out = dict(uses_map)
+    for key, entries in amplify_map.items():
+        if not entries:
+            continue
+        amplify_line = "Amplify: " + ", ".join(entries)
+        existing = normalize_keep_labels(out.get(key, ""))
+        parts: list[str] = []
+        if existing:
+            for chunk in re.split(
+                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", existing
+            ):
+                chunk = chunk.strip().strip(";").strip()
+                if not chunk or re.match(r"^Amplify:", chunk, re.IGNORECASE):
+                    continue
+                parts.append(chunk)
+        parts.append(amplify_line)
         out[key] = "; ".join(parts)
     return out
 
@@ -1880,6 +2063,11 @@ def scrape_wiki_uses() -> dict[str, str]:
         uses_map = apply_research_keep_map(uses_map, research_map)
     except Exception as e:
         print(f"  Research blueprint costs skipped ({e})")
+    try:
+        amplify_map = scrape_amplify_keep_map()
+        uses_map = apply_amplify_keep_map(uses_map, amplify_map)
+    except Exception as e:
+        print(f"  Amplify material costs skipped ({e})")
     return uses_map
 
 
@@ -2030,6 +2218,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         "Research: ",
         text,
     )
+    text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
     return text
 
 
@@ -2096,7 +2285,7 @@ def format_keep_for(
     project_entries: list[str] = []
     if wiki:
         for chunk in re.split(
-            r"(?=(?:Workshop|Quests|Projects|Research):)", wiki
+            r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", wiki
         ):
             chunk = chunk.strip().strip(";").strip()
             if not chunk:
@@ -2175,7 +2364,7 @@ _BARE_DISPOSE_ACTIONS = frozenset({
 # keep_for values that mean a real progression hold (not "Quick Use consumable")
 _PROGRESS_KEEP_RE = re.compile(
     r"quests?|projects?|workshop|upgrade|expedition|scrappy|"
-    r"research\s*:|research\s+station|"
+    r"research\s*:|research\s+station|amplify\s*:|"
     r"flickering\s+flames|\bstage\b",
     re.IGNORECASE,
 )
@@ -2599,6 +2788,29 @@ Examples:
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing files")
     parser.add_argument("--csv-only", action="store_true", help="Update CSV only, skip DB rebuild")
     parser.add_argument(
+        "--maps-only",
+        action="store_true",
+        help="Only refresh Metaforge map markers + basemap tiles into arlo.db",
+    )
+    parser.add_argument(
+        "--force-map-assets",
+        action="store_true",
+        help="Re-download/stitch basemap tiles even when reference.png already exists",
+    )
+    parser.add_argument(
+        "--loose-spots",
+        action="store_true",
+        help=(
+            "Also crawl Metaforge item-view loose spawn points for every "
+            "loot-tagged item × map (slow; normally warmed lazily on search)"
+        ),
+    )
+    parser.add_argument(
+        "--skip-maps",
+        action="store_true",
+        help="Skip map marker / basemap sync",
+    )
+    parser.add_argument(
         "--source",
         choices=["hybrid", "api", "wiki"],
         default="hybrid",
@@ -2610,6 +2822,29 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if args.maps_only:
+        if args.dry_run:
+            print("[DRY RUN] Would fetch map markers + basemaps")
+            return
+        from arc_helper.map_ingest import store_map_catalog
+
+        print("Updating map catalog from Metaforge...")
+        stats = store_map_catalog(
+            ARLO_DB,
+            force_assets=args.force_map_assets,
+            fetch_loose_spots=args.loose_spots,
+        )
+        total = sum(v for k, v in stats.items() if not k.startswith("_"))
+        extra = ""
+        if "_loose_clusters" in stats:
+            extra = f", {stats['_loose_clusters']} loose-spot clusters"
+        print(
+            f"Done — {total} markers across "
+            f"{len([k for k in stats if not k.startswith('_')])} maps"
+            f"{extra}"
+        )
+        return
 
     persist_side = not args.dry_run
 
@@ -2670,6 +2905,15 @@ Examples:
         # Side catalogs already wrote quest/project/trader tables into ARLO_DB;
         # refresh the items table (and re-sync others from CSV if present).
         rebuild_arlo_db_from_csvs(db_path=ARLO_DB)
+
+    if not args.skip_maps and not args.csv_only:
+        try:
+            from arc_helper.map_ingest import store_map_catalog
+
+            print("\nUpdating map catalog from Metaforge...")
+            store_map_catalog(ARLO_DB, force_assets=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"  Map catalog update skipped ({e})")
 
     _mark_updated()
     print("\nDone!")
@@ -2762,6 +3006,12 @@ def auto_update(*, force: bool = False) -> bool:
 
         write_csv(rows, ITEMS_CSV)
         rebuild_arlo_db_from_csvs(db_path=ARLO_DB)
+        try:
+            from arc_helper.map_ingest import store_map_catalog
+
+            store_map_catalog(ARLO_DB, force_assets=False)
+        except Exception as map_err:  # noqa: BLE001
+            print(f"  Map catalog update skipped ({map_err})")
         _mark_updated()
 
         new_count = stats.items_written - stats.items_preserved
