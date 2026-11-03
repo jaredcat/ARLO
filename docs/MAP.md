@@ -38,7 +38,7 @@ Metaforge draws dots on a GPU canvas and pans by transforming one layer. ARLO’
 
 **Wayland:** in-game overlay is off (F8 only). A single chroma window becomes a black slab under XWayland; per-pin windows thrash the compositor. Native **X11** and **Windows** use one PhotoImage blit (cheap at higher pin caps). Force Wayland micro-windows with `ARLO_WAYLAND_INGAME_PINS=1` (not recommended).
 
-Basemaps are stitched from Metaforge’s interactive map tiles on `static.metaforge.app` (`…/maps/{layer}/{z}/…`). Ingest tries `{x}/{y}.webp` first, then falls back to `{x}_{y}.webp`. Pin projection uses each map’s Metaforge `worldExtent` (not marker min/max). Metaforge’s CRS grows **south** with lat, so north-up PNGs map increasing lat → increasing image Y. When a tile pyramid is missing, ingest falls back to `static.metaforge.app/.../custom/{map_id}.png`.
+Basemaps are stitched from Metaforge’s interactive map tiles on `static.metaforge.app` (`…/maps/{layer}/{z}/…`). Ingest tries `{x}/{y}.webp` first, then falls back to `{x}_{y}.webp`. Metaforge maps marker `worldExtent` onto a `tileExtent` rectangle in Leaflet zoom-0 CRS (axis-aligned affine) — ARLO uses that same transform so pins land on the stitched tile grid. Tiles often leave empty margins, so ingest **crops** those and remaps CRS to the painted pixels. Pins are drawn at true CRS positions inside that cropped image only — never edge-clamped. Some API markers sit past `worldExtent` but still on painted tiles (e.g. Spaceport Taking Stock); those stay visible. When a tile pyramid is missing, ingest falls back to `static.metaforge.app/.../custom/{map_id}.png`.
 
 ## What the pins mean
 

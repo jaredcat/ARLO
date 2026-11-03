@@ -68,7 +68,13 @@ def _pil_to_qpixmap(im: Image.Image) -> QPixmap:
     if im.mode != "RGBA":
         im = im.convert("RGBA")
     data = im.tobytes("raw", "RGBA")
-    qimg = QImage(data, im.width, im.height, QImage.Format.Format_RGBA8888)
+    qimg = QImage(
+        data,
+        im.width,
+        im.height,
+        im.width * 4,
+        QImage.Format.Format_RGBA8888,
+    )
     return QPixmap.fromImage(qimg.copy())
 
 
@@ -120,6 +126,7 @@ class MapWindow(QWidget):
         self._meta: MapMeta | None = None
         self._markers: list[MapMarker] = []
         self._base_image: Image.Image | None = None
+        self._base_image_mtime: float | None = None
         self._player: tuple[float, float, float | None] | None = None
         self._item_filter: str | None = self.filter_state.item_filter
         self._suspend_filter_notify = False
@@ -252,8 +259,12 @@ class MapWindow(QWidget):
         self.raise_()
         self.activateWindow()
         self._visible = True
-        QTimer.singleShot(50, self._fit_view)
-        self._redraw()
+        # Pick up restitched basemaps without requiring an app restart.
+        if self._basemap_file_changed():
+            self.reload_map()
+        else:
+            QTimer.singleShot(50, self._fit_view)
+            self._redraw()
 
     def hide(self) -> None:
         QWidget.hide(self)
@@ -278,12 +289,28 @@ class MapWindow(QWidget):
         self.filter_state.locked_only = self._locked_only.isChecked()
         self.current_map_id = self.filter_state.map_id
 
+    def _basemap_file_changed(self) -> bool:
+        map_id = (self._map_menu.currentData() or "").strip()
+        path = reference_path(map_id)
+        if not path.is_file() and self._meta and self._meta.reference_rel:
+            alt = DATA_DIR / self._meta.reference_rel
+            if alt.is_file():
+                path = alt
+        if not path.is_file():
+            return self._base_image is not None
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return False
+        return self._base_image_mtime != mtime
+
     def reload_map(self) -> None:
         map_id = (self._map_menu.currentData() or "").strip()
         self.current_map_id = map_id
         self.filter_state.map_id = map_id
         self._meta = self.catalog.get_meta(map_id) if self.catalog else None
         self._base_image = None
+        self._base_image_mtime = None
         path = reference_path(map_id)
         if not path.is_file() and self._meta and self._meta.reference_rel:
             alt = DATA_DIR / self._meta.reference_rel
@@ -293,6 +320,7 @@ class MapWindow(QWidget):
             try:
                 raw = Image.open(path).convert("RGBA")
                 self._base_image = self._for_display(raw)
+                self._base_image_mtime = path.stat().st_mtime
             except OSError as e:
                 logger.warning("Could not load map image %s: %s", path, e)
         if self._base_image is None and self._meta is not None:
@@ -338,6 +366,7 @@ class MapWindow(QWidget):
             self.filter_state,
             origin=origin,
             limit=MAX_PINS,
+            meta=self._meta,
         )
         self._fill_results()
         self._redraw()
@@ -491,40 +520,49 @@ class MapWindow(QWidget):
         if self._basemap_item is None:
             self._scene.clear()
             self._basemap_item = self._scene.addPixmap(pix)
-            self._scene.setSceneRect(self._basemap_item.boundingRect())
         else:
             self._basemap_item.setPixmap(pix)
+        # Always lock the scene to the basemap — off-image ellipses must not
+        # expand the view into the black void around the PNG.
+        self._scene.setSceneRect(self._basemap_item.boundingRect())
 
         iw, ih = self._base_image.size
         r = 4.0
-        for m in self._markers[:DRAW_PIN_CAP]:
-            if not self._meta:
+        drawn = 0
+        for m in self._markers:
+            if not self._meta or drawn >= DRAW_PIN_CAP:
                 break
             nx, ny = latlng_to_norm(m.lat, m.lng, self._meta)
+            # True CRS only — never clamp. Markers past the painted reference
+            # (content-cropped worldExtent) are omitted, not dragged to the edge.
+            if not (0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0):
+                continue
             x, y = nx * iw, ny * ih
             color = QColor(CATEGORY_COLORS.get(m.category, "#ffffff"))
             ell = self._scene.addEllipse(x - r, y - r, r * 2, r * 2, QPen(Qt.PenStyle.NoPen), color)
             self._pin_items.append(ell)
+            drawn += 1
 
         if self._player and self._meta:
             nx, ny = latlng_to_norm(self._player[0], self._player[1], self._meta)
-            x, y = nx * iw, ny * ih
-            pr = 8.0
-            self._player_item = self._scene.addEllipse(
-                x - pr,
-                y - pr,
-                pr * 2,
-                pr * 2,
-                QPen(QColor("white"), 2),
-                QColor(PLAYER_COLOR),
-            )
-            facing = self._player[2]
-            if facing is not None:
-                tip = 14.0
-                self._scene.addLine(
-                    x,
-                    y,
-                    x + tip * math.cos(facing),
-                    y - tip * math.sin(facing),
-                    QPen(QColor(PLAYER_COLOR), 2),
+            if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
+                x, y = nx * iw, ny * ih
+                pr = 8.0
+                self._player_item = self._scene.addEllipse(
+                    x - pr,
+                    y - pr,
+                    pr * 2,
+                    pr * 2,
+                    QPen(QColor("white"), 2),
+                    QColor(PLAYER_COLOR),
                 )
+                facing = self._player[2]
+                if facing is not None:
+                    tip = 14.0
+                    self._scene.addLine(
+                        x,
+                        y,
+                        x + tip * math.cos(facing),
+                        y - tip * math.sin(facing),
+                        QPen(QColor(PLAYER_COLOR), 2),
+                    )

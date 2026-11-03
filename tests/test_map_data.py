@@ -186,6 +186,24 @@ def test_norm_roundtrip():
     assert lng2 == pytest.approx(lng)
 
 
+def test_latlng_on_reference_clips_outside_basemap():
+    from arc_helper.map_data import latlng_on_reference
+
+    meta = MapMeta(
+        map_id="dam",
+        lat_min=1000.0,
+        lat_max=2000.0,
+        lng_min=3000.0,
+        lng_max=4000.0,
+    )
+    assert latlng_on_reference(1500.0, 3500.0, meta)
+    assert latlng_on_reference(1000.0, 3000.0, meta)
+    assert latlng_on_reference(2000.0, 4000.0, meta)
+    assert not latlng_on_reference(500.0, 3500.0, meta)
+    assert not latlng_on_reference(1500.0, 5000.0, meta)
+    assert latlng_on_reference(990.0, 3500.0, meta, margin=0.02)
+
+
 def test_latlng_y_increases_south_on_metaforge_crs():
     """Metaforge lat grows southward; north-up PNG needs low lat → low y."""
     meta = MapMeta(
@@ -200,6 +218,80 @@ def test_latlng_y_increases_south_on_metaforge_crs():
     _nx_s, ny_s = latlng_to_norm(9174.0, 9774.0, meta)
     assert ny_n < ny_s
     assert ny_n == pytest.approx((7078.0 - 2048.0) / (14336.0 - 2048.0))
+
+
+def test_spaceport_tile_extent_affine_places_taking_stock():
+    """Spaceport worldExtent maps onto tileExtent — not the full 2^z square."""
+    from arc_helper.map_ingest import MAP_TILE_CONFIGS
+    from arc_helper.map_ingest import latlng_to_tile_crs
+    from arc_helper.map_ingest import tile_crs_to_latlng
+    from arc_helper.map_ingest import tile_grid_crs_bounds
+
+    cfg = MAP_TILE_CONFIGS["spaceport"]
+    assert cfg.crs_south_up is False
+    assert cfg.tile_extent is not None
+
+    # Round-trip a Taking Stock pin through the Metaforge Br affine.
+    lat0, lng0 = 2824.78, 3793.93
+    tx, ty = latlng_to_tile_crs(cfg, lat0, lng0)
+    lat1, lng1 = tile_crs_to_latlng(cfg, tx, ty)
+    assert lat1 == pytest.approx(lat0)
+    assert lng1 == pytest.approx(lng0)
+
+    # Northern Taking Stock pins sit above worldExtent but still on zoom tiles.
+    n_lat, n_lng = 1110.18, 3382.66
+    n_tx, n_ty = latlng_to_tile_crs(cfg, n_lat, n_lng)
+    assert 0.0 < n_tx < cfg.tile_size
+    assert 0.0 < n_ty < cfg.tile_size
+
+    # Full z2 grid CRS must cover all four Taking Stock coords.
+    lat_min, lat_max, lng_min, lng_max = tile_grid_crs_bounds(cfg, 0, 3, 0, 3)
+    pins = [
+        (1110.18, 3382.66),
+        (1769.67, 2700.58),
+        (2824.78, 3793.93),
+        (2882.4737877729835, 3764.9719804252877),
+    ]
+    for lat, lng in pins:
+        assert lat_min <= lat <= lat_max
+        assert lng_min <= lng <= lng_max
+
+    # North-up: higher lat → higher y (south toward bottom of PNG).
+    meta = MapMeta(
+        map_id="spaceport",
+        lat_min=lat_min,
+        lat_max=lat_max,
+        lng_min=lng_min,
+        lng_max=lng_max,
+    )
+    _nx_n, ny_n = latlng_to_norm(1110.18, 3382.66, meta)
+    _nx_s, ny_s = latlng_to_norm(2824.78, 3793.93, meta)
+    assert ny_n < ny_s
+    lat, lng = norm_to_latlng(*latlng_to_norm(2824.78, 3793.93, meta), meta)
+    assert lat == pytest.approx(2824.78)
+    assert lng == pytest.approx(3793.93)
+
+
+def test_crop_reference_allows_sparse_content_and_south_up():
+    """Stella-scale content (~15%) must crop; south_up remaps lat from image top."""
+    from PIL import Image
+
+    from arc_helper.map_ingest import crop_reference_to_content
+
+    im = Image.new("RGB", (1000, 1000), (0, 0, 0))
+    # Bright island in the upper-middle third (well under the old 60% guard).
+    for y in range(100, 400):
+        for x in range(200, 800):
+            im.putpixel((x, y), (80, 80, 80))
+    bounds = (0.0, 1000.0, 0.0, 1000.0)
+    cropped, new_bounds = crop_reference_to_content(im, bounds, south_up=True)
+    assert cropped.size[0] < 1000 and cropped.size[1] < 1000
+    lat_min, lat_max, lng_min, lng_max = new_bounds
+    # south_up: top of crop is higher lat than bottom; bbox uses a probe resize.
+    assert lat_max > lat_min
+    assert 850.0 <= lat_max <= 950.0
+    assert 150.0 <= lng_min <= 250.0
+    assert cropped.size[0] < 1000 and cropped.size[1] < 500
 
 
 def test_world_extent_bounds_and_tile_fmt_order():

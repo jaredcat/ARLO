@@ -151,8 +151,28 @@ def test_resolve_markers_category_sample_without_search():
     out = resolve_markers(cat, state, origin=None, limit=10)
     assert len(out) == 10
     assert all(m.category == "containers" for m in out)
-    out2 = resolve_markers(cat, state, origin=(0.0, 0.0), limit=INGAME_PIN_CAP)
+    cat_big = _FakeCatalog([_mk(i) for i in range(INGAME_PIN_CAP + 50)])
+    out2 = resolve_markers(cat_big, state, origin=(0.0, 0.0), limit=INGAME_PIN_CAP)
     assert len(out2) == INGAME_PIN_CAP
+
+
+def test_resolve_markers_drops_off_basemap_when_meta_given():
+    """Markers far past the stitched reference CRS are excluded before the cap."""
+    markers = [_mk(i) for i in range(20)]
+    # lat/lng == i; basemap covers 0..5 (margin 0.35 keeps ~0..6.75)
+    meta = MapMeta(
+        map_id="dam",
+        lat_min=0.0,
+        lat_max=5.0,
+        lng_min=0.0,
+        lng_max=5.0,
+    )
+    cat = _FakeCatalog(markers)
+    state = MapFilterState(map_id="dam", search="", categories={"containers"})
+    out = resolve_markers(cat, state, origin=None, limit=50, meta=meta)
+    assert len(out) == 7  # i = 0..6 within margin
+    assert all(m.lat <= 7.0 and m.lng <= 7.0 for m in out)
+    assert all(m.lat < 10 for m in out)
 
 
 def test_resolve_markers_search_text():
@@ -208,4 +228,40 @@ def test_expand_search_needles_leaper():
     assert "bison" in expand_search_needles("Leaper")
     assert "bison" in expand_search_needles("leap")
     assert "rollbot" in expand_search_needles("surveyor")
+
+
+def test_expand_search_needles_quest_slug_separators():
+    from arc_helper.map_data import expand_search_needles
+
+    needles = expand_search_needles("what we left behind")
+    assert "what-we-left-behind" in needles
+    assert "what_we_left_behind" in needles
+
+
+def test_quest_marker_labels_share_title():
+    from arc_helper.map_data import MapMarker
+    from arc_helper.map_data import marker_label
+
+    objective = MapMarker(
+        id="q1",
+        map_id="buried-city",
+        lat=1.0,
+        lng=1.0,
+        category="quests",
+        subcategory="what-we-left-behind",
+        instance_name="Search 2 containers in the Raider Camp",
+    )
+    bare = MapMarker(
+        id="q2",
+        map_id="buried-city",
+        lat=2.0,
+        lng=2.0,
+        category="quests",
+        subcategory="what-we-left-behind",
+        instance_name="",
+    )
+    assert marker_label(bare) == "What We Left Behind"
+    assert marker_label(objective) == (
+        "What We Left Behind — Search 2 containers in the Raider Camp"
+    )
 

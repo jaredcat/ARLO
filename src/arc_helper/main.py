@@ -3,7 +3,9 @@ ARLO - Main Application.
 Coordinates OCR scanning and overlay display.
 """
 
+import os
 import queue
+import signal
 import sys
 import threading
 import time
@@ -515,8 +517,10 @@ class Application:
         )
         self._ui_pump_timer = QTimer()
         self._ui_pump_timer.timeout.connect(self._pump_ui_queue)
-        self._progress_flash_timer = QTimer()
-        self._progress_flash_timer.setSingleShot(True)
+        # Set from the SIGINT handler; the pump performs the actual shutdown.
+        # Python only runs the handler between bytecodes, and Qt's loop is C++,
+        # so raising KeyboardInterrupt inside a slot hits the crash hook.
+        self._sigint_requested = False
 
         # MetaForge bookmarklet → localhost import bridge
         self._progress_flash_token = 0
@@ -552,11 +556,7 @@ class Application:
             # Scanner status pump will re-assert ACTIVE/HOTKEY on the next tick.
             self.status.set_scanning()
 
-        self._progress_flash_timer.stop()
-        with suppress(TypeError):
-            self._progress_flash_timer.timeout.disconnect()
-        self._progress_flash_timer.timeout.connect(_clear)
-        self._progress_flash_timer.start(_PROGRESS_FLASH_MS)
+        QTimer.singleShot(_PROGRESS_FLASH_MS, _clear)
 
     def _apply_status(self, status: str) -> None:
         """Apply a status update to the StatusWindow (main thread only)."""
@@ -779,6 +779,7 @@ class Application:
             state,
             origin=origin,
             limit=max(INGAME_PIN_CAP * 32, 256),
+            meta=meta,
         )
 
         left, top, _r, _b = reg.viewport_bbox
@@ -812,6 +813,10 @@ class Application:
 
     def _pump_ui_queue(self) -> None:
         """Drain scanner UI messages on the main thread (QTimer)."""
+        if self._sigint_requested:
+            self.quit()
+            return
+
         # Global map hotkeys (work while the game has focus on Wayland/Windows)
         try:
             if self.map_tap.consume_press():
@@ -967,6 +972,10 @@ class Application:
         logger.info("Press Ctrl+C in terminal to quit")
         logger.info("=" * 50)
 
+        # Defer shutdown to the UI pump. A handler that raises KeyboardInterrupt
+        # fires inside this timer slot, and PySide reports that as a crash.
+        signal.signal(signal.SIGINT, lambda _signum, _frame: self._request_sigint())
+
         # Map filters hotkeys: global tap (evdev/GetAsyncKeyState).
         self.map_tap.start()
         self.map_find_tap.start()
@@ -990,9 +999,18 @@ class Application:
         except KeyboardInterrupt:
             self.quit()
 
+    def _request_sigint(self) -> None:
+        """Ask the main-thread pump to shut down. Safe to call from SIGINT."""
+        if self._sigint_requested:
+            # Second Ctrl+C while shutdown is in progress: abort immediately.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGINT)
+            return
+        self._sigint_requested = True
+
     def quit(self) -> None:
         """Clean shutdown."""
-        logger.info("\nShutting down...")
+        logger.info("Shutting down...")
         self._map_pins_active = False
         self._cancel_map_timers()
         with suppress(Exception):
@@ -1056,6 +1074,9 @@ def main() -> None:
 
     # Log any unhandled exception before exit
     def exception_hook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
         logger.error("=" * 50)
         logger.error("UNHANDLED EXCEPTION - APP CRASHING")
         logger.error("=" * 50)

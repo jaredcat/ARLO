@@ -5,28 +5,58 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from pathlib import Path
 
 logger = logging.getLogger("arc_helper")
+
+
+def _x11_reachable() -> bool:
+    """True when the process can open ``$DISPLAY`` (XWayland or native X11)."""
+    if not os.environ.get("DISPLAY"):
+        return False
+    # Qt/xcb needs an auth cookie; without XAUTHORITY it often fails with
+    # "Authorization required, but no authorization protocol specified".
+    xauth = os.environ.get("XAUTHORITY", "")
+    if not xauth or not Path(xauth).is_file():
+        matches = sorted(Path(f"/run/user/{os.getuid()}").glob("xauth_*"))
+        if matches:
+            os.environ["XAUTHORITY"] = str(matches[-1])
+        elif (Path.home() / ".Xauthority").is_file():
+            os.environ["XAUTHORITY"] = str(Path.home() / ".Xauthority")
+    try:
+        from Xlib import display as xlib_display
+
+        xdisplay = xlib_display.Display()
+        xdisplay.close()
+    except Exception:  # ruff: ignore[blind-except]
+        return False
+    return True
 
 
 def prepare_qt_env() -> None:
     """Call before constructing ``QApplication``.
 
     - Drop KDE's system ``QT_PLUGIN_PATH`` (ABI mismatch with the PySide6 wheel).
-    - On Linux Wayland sessions, force the **xcb** platform so overlays can
-      position themselves and stay above the game (Phase 0 chosen path).
+    - On Linux Wayland sessions, prefer **xcb** (XWayland) for overlays; if
+      X11 is unreachable, fall back to the Wayland Qt plugin so the app still
+      starts (F8 / tray). Leave ``QT_QPA_PLATFORM`` alone when already set.
     """
     os.environ.pop("QT_PLUGIN_PATH", None)
     if sys.platform.startswith("linux"):
-        # Prefer xcb under Wayland; leave alone if the user already set a platform.
         if "QT_QPA_PLATFORM" not in os.environ:
             wayland = bool(os.environ.get("WAYLAND_DISPLAY")) or (
                 os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
             )
             if wayland:
-                os.environ["QT_QPA_PLATFORM"] = "xcb"
-                logger.info("Qt platform: xcb (XWayland overlay path)")
-
+                if _x11_reachable():
+                    os.environ["QT_QPA_PLATFORM"] = "xcb"
+                    logger.info("Qt platform: xcb (XWayland overlay path)")
+                else:
+                    os.environ["QT_QPA_PLATFORM"] = "wayland"
+                    logger.warning(
+                        "Qt platform: wayland (XWayland not reachable — "
+                        "overlays may not stay above the game; F8 still works)"
+                    )
 
 def apply_overlay_flags(window, *, click_through: bool = True) -> None:
     """Frameless, always-on-top, bypass WM (override-redirect on X11)."""

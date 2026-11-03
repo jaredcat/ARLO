@@ -54,18 +54,27 @@ class MapTileConfig:
     tile_size: int = 512
     # Prefer this zoom for the stitched reference (≈2–4k px).
     zoom: int = 2
-    # Metaforge worldExtent as [lat0, lng0, lat1, lng1] (CRS.Simple corners).
+    # Metaforge worldExtent as [lat0, lng0, lat1, lng1] (marker CRS corners).
     world_extent: tuple[float, float, float, float] = (0.0, 0.0, 16384.0, 16384.0)
+    # Metaforge tileExtent [lat0, lng0, lat1, lng1] in Leaflet zoom-0 CRS units.
+    # worldExtent maps onto this rectangle via an axis-aligned affine (Br);
+    # tiles live in zoom-0 space [0, tile_size). Identity maps use
+    # (0, 0, tile_size, tile_size).
+    tile_extent: tuple[float, float, float, float] | None = None
     # Optional Metaforge tileBounds (same corner layout) when tiles are sparse.
     tile_bounds: tuple[float, float, float, float] | None = None
     # Optional scan cap when discovering sparse grids (Pendola).
     max_scan: int = 16
+    # When True, image y=0 is high lat (south). Metaforge's affine uses a
+    # positive scaleY (north-up CDN tiles); leave False unless a layer is flipped.
+    crs_south_up: bool = False
 
 
 # Extracted from Metaforge MapConfigs (surface / default layer).
 MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
     "dam": MapTileConfig(
         layer_path="dam/20260112-q85",
+        # Metaforge logical tileSize is 256; CDN ships 512px retina tiles.
         tile_size=256,
         zoom=3,
         world_extent=(
@@ -73,6 +82,12 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             5260.799310066582,
             3292.914501442535,
             2848.1510404315172,
+        ),
+        tile_extent=(
+            1509.4971770749603 / 32,
+            4864.125 / 32,
+            3048.3572746351233 / 32,
+            2625.3233572578824 / 32,
         ),
     ),
     "spaceport": MapTileConfig(
@@ -85,12 +100,19 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             3421.448788892414,
             5104.75,
         ),
+        tile_extent=(
+            3416.484711417113 / 32,
+            4478.25 / 32,
+            6437.712566726013 / 32,
+            9413.25 / 32,
+        ),
     ),
     "buried-city": MapTileConfig(
         layer_path="buried-city/20260112-q85",
         tile_size=512,
         zoom=2,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
+        tile_extent=(0.0, 0.0, 512.0, 512.0),
     ),
     "blue-gate": MapTileConfig(
         layer_path="blue-gate/20260112-q85",
@@ -102,24 +124,33 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             3439.2663383876925,
             9597.991683705897,
         ),
+        tile_extent=(
+            7456.756734878541 / 32,
+            6538.616405632005 / 32,
+            3438.0041235046288 / 32,
+            9613.10436501387 / 32,
+        ),
     ),
     "stella-montis": MapTileConfig(
         layer_path="stella-montis/v3/default",
         tile_size=256,
         zoom=3,
         world_extent=(3412.0, 2206.0, 1362.0, 4874.0),
+        tile_extent=(3599 / 32, 2071 / 32, 1288 / 32, 5081 / 32),
     ),
     "riven-tides": MapTileConfig(
         layer_path="riven-tides/20260428-q85",
         tile_size=512,
         zoom=2,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
+        tile_extent=(0.0, 0.0, 512.0, 512.0),
     ),
     "pendola-pass": MapTileConfig(
         layer_path="pendola-pass/20261005b-satellite",
         tile_size=512,
         zoom=3,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
+        tile_extent=(0.0, 0.0, 512.0, 512.0),
         tile_bounds=(3162.0, 626.0, 13220.0, 15758.0),
         max_scan=16,
     ),
@@ -139,6 +170,61 @@ def world_extent_bounds(
     )
 
 
+def _resolved_tile_extent(
+    cfg: MapTileConfig,
+) -> tuple[float, float, float, float]:
+    """Zoom-0 CRS rectangle that ``world_extent`` maps onto (Metaforge tileExtent)."""
+    if cfg.tile_extent is not None:
+        return cfg.tile_extent
+    ts = float(cfg.tile_size)
+    return (0.0, 0.0, ts, ts)
+
+
+def extent_affine(
+    world_extent: tuple[float, float, float, float],
+    tile_extent: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Metaforge Br(): map world lat/lng → zoom-0 tile CRS.
+
+    Returns ``(scale_x, offset_x, scale_y, offset_y)`` where
+    ``tile_x = scale_x * lng + offset_x`` and ``tile_y = scale_y * lat + offset_y``.
+    Corner layout matches MapConfigs: extent[lat0, lng0, lat1, lng1].
+    """
+    we_lat0, we_lng0, we_lat1, we_lng1 = world_extent
+    te_lat0, te_lng0, te_lat1, te_lng1 = tile_extent
+    scale_x = (te_lng1 - te_lng0) / (we_lng1 - we_lng0)
+    offset_x = te_lng0 - scale_x * we_lng0
+    scale_y = (te_lat1 - te_lat0) / (we_lat1 - we_lat0)
+    offset_y = te_lat0 - scale_y * we_lat0
+    return scale_x, offset_x, scale_y, offset_y
+
+
+def tile_crs_to_latlng(
+    cfg: MapTileConfig,
+    tile_x: float,
+    tile_y: float,
+) -> tuple[float, float]:
+    """Inverse of Metaforge's world→tile affine (zoom-0 CRS → marker lat/lng)."""
+    scale_x, offset_x, scale_y, offset_y = extent_affine(
+        cfg.world_extent, _resolved_tile_extent(cfg)
+    )
+    lng = (tile_x - offset_x) / scale_x
+    lat = (tile_y - offset_y) / scale_y
+    return lat, lng
+
+
+def latlng_to_tile_crs(
+    cfg: MapTileConfig,
+    lat: float,
+    lng: float,
+) -> tuple[float, float]:
+    """Forward Metaforge world→tile affine (marker lat/lng → zoom-0 CRS)."""
+    scale_x, offset_x, scale_y, offset_y = extent_affine(
+        cfg.world_extent, _resolved_tile_extent(cfg)
+    )
+    return scale_x * lng + offset_x, scale_y * lat + offset_y
+
+
 def tile_grid_crs_bounds(
     cfg: MapTileConfig,
     min_x: int,
@@ -146,24 +232,114 @@ def tile_grid_crs_bounds(
     min_y: int,
     max_y: int,
 ) -> tuple[float, float, float, float]:
-    """CRS lat/lng coverage of a stitched zoom-tile grid.
+    """CRS lat/lng coverage of a stitched zoom-tile index range.
 
-    Metaforge ``worldExtent`` is [lat0,lng0,lat1,lng1]. At zoom ``z`` the world
-    is a ``2^z × 2^z`` tile grid. Tile row 0 is the **north** edge of the
-    image; Metaforge's lat grows **south**, so the top of the PNG is the
-    smaller lat value. Pin projection must use this rectangle — not
-    ``tile_bounds`` (view padding) alone.
+    Metaforge does **not** stretch ``worldExtent`` across the full ``2^z`` grid.
+    Markers use world lat/lng; Leaflet places tiles in zoom-0 CRS space via an
+    affine onto ``tileExtent``. Tile ``(tx, ty)`` at zoom ``z`` covers
+    ``[tx, tx+1) * tile_size / 2^z`` in that zoom-0 space. Positive ``scale_y``
+    puts low lat (north) at small tile-y → top of the PNG.
     """
-    lat_min_w, lat_max_w, lng_min_w, lng_max_w = world_extent_bounds(cfg.world_extent)
-    n = max(1, 2**cfg.zoom)
-    lat_span = lat_max_w - lat_min_w
-    lng_span = lng_max_w - lng_min_w
-    lng_min = lng_min_w + (min_x / n) * lng_span
-    lng_max = lng_min_w + ((max_x + 1) / n) * lng_span
-    # Top of image (min_y) = northern / smaller lat; bottom = southern / larger lat.
-    lat_min = lat_min_w + (min_y / n) * lat_span
-    lat_max = lat_min_w + ((max_y + 1) / n) * lat_span
-    return lat_min, lat_max, lng_min, lng_max
+    scale = max(1, 2**cfg.zoom)
+    ts = float(cfg.tile_size)
+    tcrs_x0 = min_x * ts / scale
+    tcrs_x1 = (max_x + 1) * ts / scale
+    tcrs_y0 = min_y * ts / scale
+    tcrs_y1 = (max_y + 1) * ts / scale
+    corners = [
+        tile_crs_to_latlng(cfg, tx, ty)
+        for tx in (tcrs_x0, tcrs_x1)
+        for ty in (tcrs_y0, tcrs_y1)
+    ]
+    lats = [c[0] for c in corners]
+    lngs = [c[1] for c in corners]
+    return min(lats), max(lats), min(lngs), max(lngs)
+
+
+def _content_bbox(
+    im: Image.Image, *, threshold: int = 8
+) -> tuple[int, int, int, int] | None:
+    """Inclusive pixel bbox of non-near-black content, or None if empty."""
+    rgba = im.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    # Luma-ish max channel keeps dark terrain; ignore fully transparent.
+    rgb = rgba.convert("RGB")
+    extrema = rgb.getextrema()
+    if not extrema:
+        return None
+    # Build a mask via point ops would be heavy; use numpy-free scan of resized probe.
+    probe = rgb.resize(
+        (min(512, rgb.size[0]), min(512, rgb.size[1])),
+        Image.Resampling.BOX,
+    )
+    px = probe.load()
+    w, h = probe.size
+    sx = rgb.size[0] / w
+    sy = rgb.size[1] / h
+    min_x, min_y, max_x, max_y = w, h, -1, -1
+    for y in range(h):
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r > threshold or g > threshold or b > threshold:
+                if x < min_x:
+                    min_x = x
+                if y < min_y:
+                    min_y = y
+                if x > max_x:
+                    max_x = x
+                if y > max_y:
+                    max_y = y
+    if max_x < 0:
+        return None
+    left = max(0, int(min_x * sx))
+    top = max(0, int(min_y * sy))
+    right = min(rgb.size[0] - 1, int((max_x + 1) * sx) - 1)
+    bottom = min(rgb.size[1] - 1, int((max_y + 1) * sy) - 1)
+    return left, top, right, bottom
+
+
+def crop_reference_to_content(
+    im: Image.Image,
+    bounds: tuple[float, float, float, float],
+    *,
+    threshold: int = 8,
+    south_up: bool = False,
+) -> tuple[Image.Image, tuple[float, float, float, float]]:
+    """Drop empty black margins and remap CRS bounds to the kept pixels.
+
+    Metaforge tile pyramids only paint part of ``worldExtent`` (often ~60% of
+    the square, Stella much less). Projecting onto the full black canvas makes
+    pins float in the void around the art. Crop to painted pixels and shrink
+    the CRS to match — same idea as per-map tile path / ``crs_south_up`` rules.
+    """
+    box = _content_bbox(im, threshold=threshold)
+    if box is None:
+        return im, bounds
+    left, top, right, bottom = box
+    w, h = im.size
+    # Reject empty / noise crops only — Stella legitimately paints << 60%.
+    if (right - left + 1) < w * 0.05 or (bottom - top + 1) < h * 0.05:
+        return im, bounds
+    if left == 0 and top == 0 and right == w - 1 and bottom == h - 1:
+        return im, bounds
+    lat_min, lat_max, lng_min, lng_max = bounds
+    lat_span = lat_max - lat_min
+    lng_span = lng_max - lng_min
+    if south_up:
+        # Image y=0 is lat_max (Leaflet CRS.Simple / CDN south-up).
+        new_lat_max = lat_max - (top / h) * lat_span
+        new_lat_min = lat_max - ((bottom + 1) / h) * lat_span
+    else:
+        new_lat_min = lat_min + (top / h) * lat_span
+        new_lat_max = lat_min + ((bottom + 1) / h) * lat_span
+    new_bounds = (
+        min(new_lat_min, new_lat_max),
+        max(new_lat_min, new_lat_max),
+        lng_min + (left / w) * lng_span,
+        lng_min + ((right + 1) / w) * lng_span,
+    )
+    cropped = im.crop((left, top, right + 1, bottom + 1))
+    return cropped, new_bounds
 
 
 def reference_bounds_path(map_id: str) -> Path:
@@ -243,7 +419,9 @@ def tile_config_signature(cfg: MapTileConfig) -> dict[str, object]:
         "zoom": cfg.zoom,
         "tile_size": cfg.tile_size,
         "world_extent": list(cfg.world_extent),
+        "tile_extent": list(_resolved_tile_extent(cfg)),
         "tile_bounds": list(cfg.tile_bounds) if cfg.tile_bounds else None,
+        "crs_south_up": cfg.crs_south_up,
     }
 
 
@@ -485,14 +663,40 @@ def _stitch_reference(
     if grid is None:
         return None
     min_x, max_x, min_y, max_y = grid
-    cols = max_x - min_x + 1
-    rows = max_y - min_y + 1
-    tile_size = cfg.tile_size
-    width = cols * tile_size
-    height = rows * tile_size
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
+    # Always cover the full Metaforge worldExtent tile square so pin
+    # projection matches Leaflet (subset grids used to shift CRS and park
+    # markers in the black void around the PNG).
+    n = max(1, 2**zoom)
     tile_dir = map_dir(map_id) / f"tiles_z{zoom}"
     tile_dir.mkdir(parents=True, exist_ok=True)
+
+    # Prefer the real pixel size of the first tile — config can drift
+    # (Dam's Metaforge layer ships 512px retina tiles with logical tileSize 256).
+    tile_size = cfg.tile_size
+    for x0 in range(min_x, max_x + 1):
+        for y0 in range(min_y, max_y + 1):
+            probe = tile_dir / f"{x0}_{y0}.webp"
+            url = _tile_url(cfg, zoom, x0, y0, name_fmt)
+            if not probe.is_file() and not _download(sess, url, probe):
+                continue
+            try:
+                with Image.open(probe) as tip:
+                    tile_size = tip.size[0]
+                break
+            except OSError:
+                continue
+        else:
+            continue
+        break
+    if tile_size != cfg.tile_size:
+        print(
+            f"  Note: {map_id} tiles are {tile_size}px "
+            f"(config had {cfg.tile_size}px) — using actual size"
+        )
+
+    width = n * tile_size
+    height = n * tile_size
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
 
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
@@ -502,17 +706,27 @@ def _stitch_reference(
                 continue
             try:
                 with Image.open(dest) as tile:
-                    px = (x - min_x) * tile_size
-                    py = (y - min_y) * tile_size
+                    px = x * tile_size
+                    py = y * tile_size
                     canvas.paste(tile.convert("RGBA"), (px, py))
             except OSError:
                 continue
             time.sleep(0.02)
 
+    # Full 2^z grid in zoom-0 CRS → world via tileExtent affine (not a linear
+    # stretch of worldExtent onto the square). Crop empty margins and remap.
+    bounds = tile_grid_crs_bounds(cfg, 0, n - 1, 0, n - 1)
+    canvas, bounds = crop_reference_to_content(
+        canvas, bounds, south_up=cfg.crs_south_up
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path, format="PNG")
-    bounds = tile_grid_crs_bounds(cfg, min_x, max_x, min_y, max_y)
     write_reference_bounds(map_id, bounds)
+    print(
+        f"  Stitched {map_id}: {canvas.size[0]}x{canvas.size[1]} "
+        f"from tiles x={min_x}..{max_x} y={min_y}..{max_y} on {n}x{n} world grid "
+        f"(CRS lat[{bounds[0]:.1f},{bounds[1]:.1f}] lng[{bounds[2]:.1f},{bounds[3]:.1f}])"
+    )
     return canvas.size, bounds
 
 
@@ -1153,7 +1367,10 @@ __all__ = [
     "infer_reference_bounds_from_tiles",
     "read_reference_bounds",
     "tile_config_signature",
+    "tile_crs_to_latlng",
     "tile_grid_crs_bounds",
+    "latlng_to_tile_crs",
+    "extent_affine",
     "world_extent_bounds",
     "write_maps_manifest",
     "write_reference_bounds",

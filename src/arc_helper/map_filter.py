@@ -8,9 +8,11 @@ from dataclasses import field
 from .map_data import CATEGORIES
 from .map_data import MapCatalog
 from .map_data import MapMarker
+from .map_data import MapMeta
+from .map_data import latlng_on_reference
 
 # Cap for in-game overlay (single Qt surface; cheap even at higher counts).
-INGAME_PIN_CAP = 60
+INGAME_PIN_CAP = 300
 
 
 @dataclass
@@ -54,16 +56,33 @@ def resolve_markers(
     *,
     origin: tuple[float, float] | None = None,
     limit: int = INGAME_PIN_CAP,
+    meta: MapMeta | None = None,
 ) -> list[MapMarker]:
     """Query markers for F8 preview and the in-game overlay.
 
     With a search / item filter: loose spawn clusters + loot-area tags, plus
     free-text name hits. With no search: a capped sample of the checked
     categories (same dots F8 shows) so the overlay matches the filter window.
+
+    When ``meta`` is set, markers outside the stitched basemap CRS are dropped
+    before sampling so F8 / overlay budgets are not wasted on off-image points.
     """
     map_id = state.map_id
     search = (state.search or "").strip() or None
     item = (state.item_filter or "").strip() or None
+
+    def _on_basemap(markers: list[MapMarker]) -> list[MapMarker]:
+        if meta is None:
+            return markers
+        # Category browsing: sample pins that project onto the painted basemap
+        # CRS (after content-crop). Never edge-clamp — that invents positions.
+        # Search/item paths below keep every hit; map_window still only draws
+        # markers inside 0..1 of the reference image.
+        return [
+            m
+            for m in markers
+            if latlng_on_reference(m.lat, m.lng, meta, margin=0.35)
+        ]
 
     if not search and not item:
         markers = catalog.query_markers(
@@ -73,7 +92,7 @@ def resolve_markers(
             origin=origin,
             limit=None,
         )
-        return _sample(markers, limit)
+        return _sample(_on_basemap(markers), limit)
 
     needle = item or search
     assert needle is not None

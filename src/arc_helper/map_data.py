@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 from pathlib import Path
 
@@ -104,6 +105,16 @@ ARC_RELATED_HUSKS: dict[str, tuple[str, ...]] = {
 }
 
 
+def humanize_slug(slug: str) -> str:
+    """``what-we-left-behind`` / ``a_first_foothold`` → title case."""
+    s = (slug or "").strip()
+    if not s:
+        return ""
+    if "-" in s or "_" in s:
+        return " ".join(p.capitalize() for p in re.split(r"[-_]+", s) if p)
+    return s
+
+
 def marker_label(
     marker: MapMarker | None = None,
     *,
@@ -112,6 +123,7 @@ def marker_label(
     category: str = "",
     loot_areas: str = "",
     with_loot: bool = False,
+    quest_title: str | None = None,
 ) -> str:
     """Human-readable pin name (ARC aliases, then instance, subcategory, category)."""
     if marker is not None:
@@ -122,6 +134,24 @@ def marker_label(
     inst = (instance_name or "").strip()
     sub = (subcategory or "").strip()
     cat = (category or "").strip()
+
+    # Quest pins share one title; objective text is a subtitle when present.
+    if cat == "quests" and sub:
+        title = (quest_title or "").strip() or humanize_slug(sub)
+        if inst:
+            inst_l = inst.lower()
+            title_l = title.lower()
+            # Prefer the instance string when it already names the quest.
+            if inst_l == title_l or inst_l == sub.lower() or title_l in inst_l:
+                base = inst
+            else:
+                base = f"{title} — {inst}"
+        else:
+            base = title
+        if with_loot and (loot_areas or "").strip():
+            base = f"{base} ({loot_areas.strip()})"
+        return base
+
     if inst:
         # Prefer a real instance label; still rewrite bare internal ARC ids.
         if inst.lower() == sub.lower() and sub in ARC_SUBCATEGORY_NAMES:
@@ -131,13 +161,15 @@ def marker_label(
     elif sub in ARC_SUBCATEGORY_NAMES:
         base = ARC_SUBCATEGORY_NAMES[sub]
     else:
-        base = (sub.replace("_", " ") if sub else "") or cat or "pin"
+        base = humanize_slug(sub) if sub else ""
+        if not base:
+            base = cat or "pin"
     # Clarify rooms / open spots (not ARC aliases or plain containers)
     if (
-        cat in {"locations", "events", "quests", "nature"}
+        cat in {"locations", "events", "nature"}
         and cat not in base.lower()
     ):
-        pretty_sub = sub.replace("_", " ").strip()
+        pretty_sub = humanize_slug(sub) if ("-" in sub or "_" in sub) else sub
         if (
             pretty_sub
             and pretty_sub.lower() not in base.lower()
@@ -159,6 +191,16 @@ def expand_search_needles(search: str) -> list[str]:
     needles: list[str] = [raw]
     key = raw.lower()
     seen = {key}
+    # Quest/item slugs: spaces ↔ hyphens ↔ underscores
+    collapsed = re.sub(r"[-_\s]+", " ", key).strip()
+    if collapsed and collapsed not in seen:
+        needles.append(collapsed)
+        seen.add(collapsed)
+    for sep in ("-", "_"):
+        variant = sep.join(collapsed.split()) if collapsed else ""
+        if variant and variant not in seen:
+            needles.append(variant)
+            seen.add(variant)
     # Exact subcategory id typed
     if key in ARC_SUBCATEGORY_NAMES and ARC_SUBCATEGORY_NAMES[key].lower() not in seen:
         needles.append(ARC_SUBCATEGORY_NAMES[key])
@@ -958,6 +1000,14 @@ def parse_loot_areas(raw: str | list | None) -> list[str]:
     return [p.strip() for p in text.split(",") if p.strip()]
 
 
+def _map_crs_south_up(map_id: str) -> bool:
+    """Per-map lat→image Y rule (lazy import avoids map_ingest cycle)."""
+    from arc_helper.map_ingest import MAP_TILE_CONFIGS
+
+    cfg = MAP_TILE_CONFIGS.get(map_id)
+    return bool(cfg and cfg.crs_south_up)
+
+
 def latlng_to_norm(
     lat: float,
     lng: float,
@@ -965,15 +1015,39 @@ def latlng_to_norm(
 ) -> tuple[float, float]:
     """Map Metaforge lat/lng → normalized (x, y) in 0..1 (y=0 at top of image).
 
-    Metaforge CRS.Simple treats the first coordinate like a **downward** map Y
-    on ARC maps (higher ``lat`` = further south on Pendola). The stitched
-    reference PNG is north-up, so we map increasing lat → increasing y.
+    Higher ``lat`` is further south on ARC maps. Stitched basemaps are north-up
+    (increasing lat → +y) via Metaforge's tileExtent affine. Maps with
+    ``MapTileConfig.crs_south_up`` flip that (increasing lat → −y) only when a
+    layer's tiles are inverted relative to Leaflet.
     """
     lat_span = meta.lat_max - meta.lat_min or 1.0
     lng_span = meta.lng_max - meta.lng_min or 1.0
     x = (lng - meta.lng_min) / lng_span
-    y = (lat - meta.lat_min) / lat_span
+    if _map_crs_south_up(meta.map_id):
+        y = (meta.lat_max - lat) / lat_span
+    else:
+        y = (lat - meta.lat_min) / lat_span
     return x, y
+
+
+def latlng_on_reference(
+    lat: float,
+    lng: float,
+    meta: MapMeta,
+    *,
+    margin: float = 0.0,
+) -> bool:
+    """True when ``(lat, lng)`` projects onto the stitched basemap (norm in 0..1).
+
+    Metaforge marker dumps often include points past ``worldExtent`` / the
+    published tile pyramid; those must not be drawn in the black void around
+    the reference PNG (they expand the F8 scene and look like misplaced pins).
+    """
+    nx, ny = latlng_to_norm(lat, lng, meta)
+    return (
+        -margin <= nx <= 1.0 + margin
+        and -margin <= ny <= 1.0 + margin
+    )
 
 
 def norm_to_latlng(
@@ -985,7 +1059,10 @@ def norm_to_latlng(
     lat_span = meta.lat_max - meta.lat_min or 1.0
     lng_span = meta.lng_max - meta.lng_min or 1.0
     lng = meta.lng_min + x * lng_span
-    lat = meta.lat_min + y * lat_span
+    if _map_crs_south_up(meta.map_id):
+        lat = meta.lat_max - y * lat_span
+    else:
+        lat = meta.lat_min + y * lat_span
     return lat, lng
 
 
