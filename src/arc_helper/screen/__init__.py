@@ -58,5 +58,5 @@ def reset_backend() -> None:  # ruff: ignore[non-empty-init-module]
 
 
 def phys_to_tk(value: float) -> int:  # ruff: ignore[non-empty-init-module]
-    """Convert physical pixels to tkinter window coordinates."""
+    """Convert physical pixels to window (logical) coordinates."""
     return round(value / get_backend().tk_scale)

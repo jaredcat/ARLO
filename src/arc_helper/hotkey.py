@@ -291,11 +291,9 @@ class EvdevKeyTapMonitor:
         return self._edge.consume_press()
 
 
-def get_map_tap_monitor() -> TapHotkeyMonitor:
-    """Global map-toggle tap monitor for the configured ``MAP_HOTKEY``."""
-    keysym = get_settings().map_hotkey
+def _tap_monitor_for_keysym(keysym: str, *, default_vk: int) -> TapHotkeyMonitor:
     if sys.platform == "win32":
-        vk = _FKEY_VK.get(keysym.strip().upper(), 0x77)  # default F8
+        vk = _FKEY_VK.get(keysym.strip().upper(), default_vk)
         return WindowsVkTapMonitor(vk)
     backend = choose_backend_name(
         sys.platform, os.environ, get_settings().screen_backend
@@ -303,3 +301,13 @@ def get_map_tap_monitor() -> TapHotkeyMonitor:
     if backend == "wayland":
         return EvdevKeyTapMonitor(tk_keysym_to_evdev(keysym))
     return PynputKeyTapMonitor(keysym)
+
+
+def get_map_tap_monitor() -> TapHotkeyMonitor:
+    """Global map-toggle tap monitor for the configured ``MAP_HOTKEY``."""
+    return _tap_monitor_for_keysym(get_settings().map_hotkey, default_vk=0x77)
+
+
+def get_map_find_tap_monitor() -> TapHotkeyMonitor:
+    """Global find-last-item tap monitor for ``MAP_FIND_HOTKEY`` (default F9)."""
+    return _tap_monitor_for_keysym(get_settings().map_find_hotkey, default_vk=0x78)

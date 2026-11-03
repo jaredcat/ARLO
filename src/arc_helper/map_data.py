@@ -94,6 +94,15 @@ ARC_SUBCATEGORY_NAMES: dict[str, str] = {
     "wasp": "Wasp",
 }
 
+# Metaforge item ``loot_area`` values that are drop *sources*, not map zones.
+# Matching markers on these (e.g. random Fireball pins tagged ``ARC``) is noise.
+NON_PLACE_LOOT_AREAS: frozenset[str] = frozenset({"arc"})
+
+# Enemy-part items → related husk containers (subcategory ids).
+ARC_RELATED_HUSKS: dict[str, tuple[str, ...]] = {
+    "wasp": ("wasp_husk",),
+}
+
 
 def marker_label(
     marker: MapMarker | None = None,
@@ -168,6 +177,42 @@ def expand_search_needles(search: str) -> list[str]:
     if "surveyor" in key and "rollbot" not in seen:
         needles.append("rollbot")
     return needles
+
+
+def place_loot_areas(areas: set[str] | list[str] | None) -> set[str]:
+    """Loot tags usable as map zones (drops ``ARC`` source tags, etc.)."""
+    out: set[str] = set()
+    for raw in areas or ():
+        a = (raw or "").strip()
+        if a and a.casefold() not in NON_PLACE_LOOT_AREAS:
+            out.add(a)
+    return out
+
+
+def arc_subcategories_for_item(item_name: str) -> list[str]:
+    """Map an ARC part name to enemy subcategory ids (``Bully Fragmenter`` → ``bully``)."""
+    key = (item_name or "").strip().lower()
+    if not key:
+        return []
+    hits: list[str] = []
+    seen: set[str] = set()
+    # Longer display names first so ``ARC Surveyor`` beats bare ``ARC``.
+    for sub_id, display in sorted(
+        ARC_SUBCATEGORY_NAMES.items(), key=lambda kv: -len(kv[1])
+    ):
+        d = display.lower()
+        bare = d.removeprefix("arc ").strip()
+        tokens = [d, bare, sub_id.replace("-", " "), sub_id]
+        if any(t and len(t) >= 3 and t in key for t in tokens):
+            if sub_id not in seen:
+                seen.add(sub_id)
+                hits.append(sub_id)
+    if "leaper" in key and "bison" not in seen:
+        hits.append("bison")
+        seen.add("bison")
+    if "surveyor" in key and "rollbot" not in seen:
+        hits.append("rollbot")
+    return hits
 
 
 def maps_dir() -> Path:
@@ -711,7 +756,9 @@ class MapCatalog:
 
         Includes:
         - Clustered Metaforge **loose spawn** points (precise shelves/tables/…)
-        - Community markers whose ``loot_areas`` intersect the item's tags
+        - Community markers whose place ``loot_areas`` intersect the item's tags
+          (``ARC`` source tags are skipped — they are not map zones)
+        - ARC enemy pins for parts named after that enemy (``Bully Fragmenter``)
         - Nature/quest/event pins whose name matches the item
 
         Works for items **with or without** Metaforge ``loot_area`` tags.
@@ -720,7 +767,7 @@ class MapCatalog:
         ref = self.resolve_item_ref(raw, network=False)
         item_id = ref[0] if ref else None
         canonical = ref[1] if ref else raw
-        areas = set(self.loot_areas_for_item(canonical))
+        areas = place_loot_areas(self.loot_areas_for_item(canonical))
         out: list[MapMarker] = []
         seen: set[str] = set()
 
@@ -743,6 +790,28 @@ class MapCatalog:
                 if m.id not in seen:
                     seen.add(m.id)
                     out.append(m)
+
+        # Enemy-named ARC parts → that enemy's pins (not every ARC-tagged marker).
+        for sub in arc_subcategories_for_item(canonical):
+            for m in self.query_markers(
+                map_id,
+                categories={"arc"},
+                subcategory=sub,
+                origin=origin,
+            ):
+                if m.id not in seen:
+                    seen.add(m.id)
+                    out.append(m)
+            for husk in ARC_RELATED_HUSKS.get(sub, ()):
+                for m in self.query_markers(
+                    map_id,
+                    categories={"containers"},
+                    subcategory=husk,
+                    origin=origin,
+                ):
+                    if m.id not in seen:
+                        seen.add(m.id)
+                        out.append(m)
 
         # Exact-ish name match (moss, candleberries, quest props, …)
         needle = canonical.lower()

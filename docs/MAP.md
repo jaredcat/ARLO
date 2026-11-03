@@ -49,7 +49,7 @@ Markers come from `GET /api/game-map-data?tableID=arc_map_data&mapID=…`:
 - **arc** — enemy / husk style markers
 - **quests** / **locations** / **events**
 
-Searching an **item** (e.g. Radial Press, Steel Spring) highlights every pin whose `lootAreas` intersect that item’s Metaforge `loot_area` — containers, locked/breach rooms, and other tagged open-world spots — plus nature/quest pins whose name matches the item. That is approximate drop affinity, not a guarantee.
+Searching an **item** (e.g. Radial Press, Steel Spring) highlights every pin whose place `lootAreas` intersect that item’s Metaforge `loot_area` — containers, locked/breach rooms, and other tagged open-world spots — plus nature/quest pins whose name matches the item. Metaforge’s `ARC` tag is a drop *source*, not a map zone, so it is skipped (otherwise random Fireball/Pop pins tagged `ARC` would show for every ARC part). Enemy-named parts (e.g. Bully Fragmenter) pin that enemy instead. That is approximate drop affinity, not a guarantee.
 
 ## Position / viewport registration
 

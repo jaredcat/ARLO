@@ -167,7 +167,7 @@ Arpeggio I,Keep,,Equippable Weapon,5500,1
 Arpeggio II,Keep,,Equippable Weapon,8000,1
 Arpeggio III,Keep,,Equippable Weapon,11500,1
 Arpeggio IV,Keep,,Equippable Weapon,15000,1
-Assessor Matrix,Keep,"1x Advanced Mechanical Components, 3x Advanced ARC Powercell","Used in crafting; Amplify: Equalizer Anti-Shield (3x), Osprey Anti-Weak Point (2x), Equalizer Anti-Weak Point (2x)",5000,1
+Assessor Matrix,Keep,"1x Advanced Mechanical Components, 3x Advanced ARC Powercell","Amplify: Equalizer Anti-Shield (3x), Osprey Anti-Weak Point (2x), Equalizer Anti-Weak Point (2x)",5000,1
 Assorted Seeds,Sell or keep for user trading,,,100,100
 Astrolite (Outfit),Sell,,,,
 Astronaut Helmet (Scrappy Outfit),Sell,,,,
@@ -637,7 +637,7 @@ Floor Lamp Design,Sell,,,5000,1
 Floppy Disk (Backpack Charm),Sell,,,,
 Flow Controller,Keep until uses complete; recycle after,"1x Advanced Mechanical Components, 1x Sensors",Quests: Snap And Salvage (1x),3000,3
 Flushing Terminal Key,Keep until uses complete; sell after,,Quests: The Stench of Corruption (1x),100,1
-Fluted Rotor Core,Keep,,"Topside Material - crafting ingredient; Amplify: Renegade Scoped (4x), Jupiter Scoped (4x), Hairpin Sprint Shooting (4x), Burletta Sprint Shooting (4x), Canto Sprint Shooting (4x), Rascal Sprint Shooting (4x), Osprey Ergonomic Bolt (3x), Jupiter Ergonomic Bolt (3x)",5000,3
+Fluted Rotor Core,Keep,,"Amplify: Renegade Scoped (4x), Jupiter Scoped (4x), Hairpin Sprint Shooting (4x), Burletta Sprint Shooting (4x), Canto Sprint Shooting (4x), Rascal Sprint Shooting (4x), Osprey Ergonomic Bolt (3x), Jupiter Ergonomic Bolt (3x)",5000,3
 Food Wrapper,Sell,,,640,15
 Football (Backpack Attachment),Sell,,,,
 Formal Bow (Emote),Sell,,,,
@@ -821,7 +821,7 @@ Lemon,Keep,3x Assorted Seeds,Workshop: Scrappy 3 (3x),640,10
 Lemons (Backpack Charm),Sell,,,,
 Leviathan (Outfit),Sell,,,,
 Li'l Smoke Grenade,Use,"1x Chemicals, 1x Plastic Parts",Quick Use consumable,300,5
-Library Book,Sell,,,100,1
+Library Book,Keep until uses complete; sell after,,Quests: Building a Library (3x),100,1
 LiDAR Scanner,Keep until uses complete; sell after,,Quests: A Lay of the Land (1x),100,1
 Light Ammo,Keep,,Ammo,4,100
 Light Bulb,Keep until uses complete; sell after,,"Projects: Expedition 1 (5x), Expedition 2 (4x)",2000,3
@@ -865,7 +865,7 @@ Mask Fragment,Keep until uses complete; sell after,,Projects: Soul's Offering 3 
 Mastery Medal (Backpack Charm),Sell,,,,
 Mastery Medal (Backpack Charm),Sell,,,,
 Matador (Outfit),Sell,,,,
-Matriarch Reactor,Keep until uses complete; recycle after,"1x Power Rod, 1x Magnetic Accelerator","Quests: Nothing Gained (1x); Projects: Trophy Display 5 (3x); Amplify: Hairpin Tracker Rounds (2x), Osprey Tracker Rounds (2x)",11000,1
+Matriarch Reactor,Keep until uses complete; recycle after,"1x Power Rod, 1x Magnetic Accelerator","Quests: Nothing Gained (1x); Amplify: Hairpin Tracker Rounds (2x), Osprey Tracker Rounds (2x); Projects: Trophy Display 5 (3x)",11000,1
 Mechanical Components,Keep,"3x Metal Parts, 2x Rubber Parts","Workshop: Gunsmith 2 (5x); Research: Angled Grip II Blueprint (1x), Combat Mk. 3 (Flanking) Blueprint (3x), Extended Shotgun Mag II Blueprint (1x), Venator Blueprint (1x), Vertical Grip II Blueprint (1x); Projects: Expedition 5 (20x)",640,10
 Medium Ammo,Keep,,Ammo,6,80
 Medium Gun Parts,Keep,2x Simple Gun Parts,Topside Material - crafting ingredient,700,5
@@ -980,7 +980,7 @@ Planks,Keep,,Workshop: Research Station 1 (35x) Outpost Room 2 (35x); Research: 
 Plastic Parts,Keep,,"Workshop: Gear Bench 1 (25x) Utility Station 1 (50x); Projects: Expedition 2 (200x), Expedition 5 (100x)",60,50
 Plastic Trash,Sell,,,640,5
 Playing Cards,Sell,,,5000,3
-Pneumatic Actuator,Keep,,"Topside Material - crafting ingredient; Amplify: Kettle Full-Auto (3x), Burletta Full-Auto (3x), Hairpin Semi-Auto (3x), Bettina Semi-Auto (3x), Rascal High Velocity (2x)",5000,3
+Pneumatic Actuator,Keep,,"Amplify: Kettle Full-Auto (3x), Burletta Full-Auto (3x), Hairpin Semi-Auto (3x), Bettina Semi-Auto (3x), Rascal High Velocity (2x)",5000,3
 Pocket Extinguisher (Backpack Attachment),Sell,,,,
 Pocket Radar (Backpack Charm),Sell,,,,
 Pointing Dance (Emote),Sell,,,,
@@ -1021,7 +1021,7 @@ Powered Descender,Use,"1x Advanced Electrical Components, 2x ARC Circuitry",Quic
 Powered Descender Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1
 Precision Gimbal,Keep until uses complete; sell after,,Quests: Safe Harbor (1x),100,1
 Pressure Gauge (Backpack Charm),Sell,,,,
-Pressure Regulator,Keep,,"Topside Material - crafting ingredient; Amplify: Rattler Drum Mag (4x), Bettina Bigger Mag (3x), Equalizer Bigger Mag (3x), Jupiter Bigger Mag (3x), Burletta Increased Burst (2x)",5000,3
+Pressure Regulator,Keep,,"Amplify: Rattler Drum Mag (4x), Bettina Bigger Mag (3x), Equalizer Bigger Mag (3x), Jupiter Bigger Mag (3x), Burletta Increased Burst (2x)",5000,3
 Pressurizer (Backpack Attachment),Sell,,,,
 Prickly Pear,Keep,3x Assorted Seeds,Workshop: Scrappy 4 (6x),640,10
 Printed Fabric Chair,Sell,,,,
@@ -1032,7 +1032,7 @@ Processor,Keep,"1x Plastic Parts, 1x Wires",Topside Material - crafting ingredie
 Project Heartwood Blueprints,Keep until uses complete; sell after,,Quests: Stable Housing (1x),100,1
 Project Pathos Empathy Core,Keep until uses complete; sell after,,Quests: Empathetic Prototypes (1x),,1
 Projector,Crafting item,"1x Processor, 2x Wires",Used in crafting,1000,3
-Propellant Valve Assembly,Keep,,"Topside Material - crafting ingredient; Amplify: Rattler More Reload (2x), Renegade More Reload (2x), Canto Carbine Conversion (3x), Hullcracker Mag Reload (3x)",5000,3
+Propellant Valve Assembly,Keep,,"Amplify: Rattler More Reload (2x), Renegade More Reload (2x), Canto Carbine Conversion (3x), Hullcracker Mag Reload (3x)",5000,3
 Pulse Mine,Use,6x Chemicals,Quick Use consumable,470,3
 Pulse Mine Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1
 Pumped Dance (Emote),Sell,,,,
@@ -1040,7 +1040,7 @@ Punch Hands (Emote),Sell,,,,
 Punching (Emote),Sell,,,,
 Purification System Blueprint,Sell,,,,1
 Purple Glam (Face Style),Sell,,,,
-Queen Reactor,Keep until uses complete; recycle after,"1x Magnetic Accelerator, 1x Power Rod","Quests: Nothing Gained (1x); Projects: Trophy Display 4 (3x); Amplify: Aphelion Charged Burst (2x), Burletta Burst Fire (2x), Equalizer Ramping Damage (3x)",11000,1
+Queen Reactor,Keep until uses complete; recycle after,"1x Magnetic Accelerator, 1x Power Rod","Quests: Nothing Gained (1x); Amplify: Aphelion Charged Burst (2x), Burletta Burst Fire (2x), Equalizer Ramping Damage (3x); Projects: Trophy Display 4 (3x)",11000,1
 Rabbit's Foot (Backpack Charm),Sell,,,,
 Rachetta (Outfit),Sell,,,,
 Radial Press,Keep,1x Advanced Mechanical Components,Workshop: Gunsmith 3 (3x),3000,3
@@ -1418,7 +1418,7 @@ Tropical Duck,Sell,,,1000,15
 Tufted Sofa,Sell,,,,
 Tufted Sofa Design,Sell,,,5000,1
 Turban (Scrappy Outfit),Sell,,,,
-Turbine Compressor,Keep until uses complete; recycle after,"1x ARC Circuitry, 1x ARC Motion Core","Research: Trailblazer Blueprint (1x); Projects: Expedition 4 (5x); Amplify: Il Toro Slug Rounds (4x), Anvil Anvil Splitter (3x)",5000,3
+Turbine Compressor,Keep until uses complete; recycle after,"1x ARC Circuitry, 1x ARC Motion Core","Research: Trailblazer Blueprint (1x); Amplify: Il Toro Slug Rounds (4x), Anvil Anvil Splitter (3x); Projects: Expedition 4 (5x)",5000,3
 Turbo Pump,Crafting item,"1x Mechanical Components, 3x Oil",Used in crafting,2000,3
 Twig Trinket (Backpack Charm),Sell,,,,
 Unknown ARC Circuitry,Sell,,,,1

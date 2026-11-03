@@ -8,10 +8,12 @@ import pytest
 
 from arc_helper.map_data import MapCatalog
 from arc_helper.map_data import MapMeta
+from arc_helper.map_data import arc_subcategories_for_item
 from arc_helper.map_data import ensure_map_schema
 from arc_helper.map_data import latlng_to_norm
 from arc_helper.map_data import norm_to_latlng
 from arc_helper.map_data import parse_loot_areas
+from arc_helper.map_data import place_loot_areas
 
 
 def _seed_db(path) -> MapCatalog:
@@ -60,6 +62,14 @@ def test_parse_loot_areas():
     assert parse_loot_areas(None) == []
 
 
+def test_place_loot_areas_drops_arc_source_tag():
+    assert place_loot_areas(["ARC", "Industrial"]) == {"Industrial"}
+    assert place_loot_areas(["arc"]) == set()
+    assert arc_subcategories_for_item("Bully Fragmenter") == ["bully"]
+    assert arc_subcategories_for_item("Damaged Leaper Pulse Unit") == ["bison"]
+    assert arc_subcategories_for_item("ARC Alloy") == []
+
+
 def test_query_by_loot_area(tmp_path):
     cat = _seed_db(tmp_path / "t.db")
     hits = cat.query_markers("dam", categories={"containers"}, loot_areas={"Industrial"})
@@ -75,6 +85,37 @@ def test_markers_for_item_and_nature(tmp_path):
 
     moss = cat.markers_for_item("dam", "Moss")
     assert any(m.subcategory == "moss" for m in moss)
+
+
+def test_arc_part_does_not_match_unrelated_arc_tagged_pins(tmp_path):
+    """Bully Fragmenter's Metaforge tag is ARC (source), not a place zone."""
+    path = tmp_path / "t.db"
+    cat = _seed_db(path)
+    conn = sqlite3.connect(path)
+    conn.executemany(
+        """
+        INSERT INTO map_markers (
+            id, map_id, lat, lng, category, subcategory,
+            instance_name, loot_areas, behind_locked_door, zlayers
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("bully1", "dam", 1.0, 1.0, "arc", "bully", "", "", 0, 0),
+            ("fb1", "dam", 2.0, 2.0, "arc", "fireball", "", "ARC", 0, 0),
+            ("pop1", "dam", 3.0, 3.0, "arc", "pop", "", "ARC", 0, 0),
+            ("husk1", "dam", 4.0, 4.0, "containers", "wasp_husk", "", "ARC", 0, 0),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO item_loot_areas (name, loot_areas, item_id) VALUES (?, ?, ?)",
+        ("Bully Fragmenter", "ARC", "bully-fragmenter"),
+    )
+    conn.commit()
+    conn.close()
+
+    hits = cat.markers_for_item("dam", "Bully Fragmenter")
+    assert [m.subcategory for m in hits] == ["bully"]
+    assert all(m.id == "bully1" for m in hits)
 
 
 def test_item_without_loot_tags_still_resolves_loose(tmp_path):

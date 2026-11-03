@@ -9,8 +9,7 @@ from .map_data import CATEGORIES
 from .map_data import MapCatalog
 from .map_data import MapMarker
 
-# Cap for in-game overlay. On Windows/X11 this is one PhotoImage blit (cheap).
-# Wayland skips the overlay entirely (F8 only) — see map_pins_overlay.py.
+# Cap for in-game overlay (single Qt surface; cheap even at higher counts).
 INGAME_PIN_CAP = 60
 
 
