@@ -7,6 +7,7 @@ from dataclasses import field
 
 from .map_data import CATEGORIES
 from .map_data import MapCatalog
+from .map_data import MapId
 from .map_data import MapMarker
 from .map_data import MapMeta
 from .map_data import latlng_on_reference
@@ -19,7 +20,7 @@ INGAME_PIN_CAP = 300
 class MapFilterState:
     """Search + category filters shared by MapWindow and in-game pins."""
 
-    map_id: str = "dam"
+    map_id: str = MapId.DAM
     search: str = ""
     item_filter: str | None = None
     categories: set[str] = field(default_factory=lambda: set(CATEGORIES))

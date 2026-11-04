@@ -36,6 +36,8 @@ from arc_helper.config import DATA_DIR
 from arc_helper.map_data import CATEGORIES
 from arc_helper.map_data import CATEGORY_COLORS
 from arc_helper.map_data import MAP_DISPLAY_NAMES
+from arc_helper.map_data import MapId
+from arc_helper.map_data import map_display_name
 from arc_helper.map_data import MapCatalog
 from arc_helper.map_data import MapMarker
 from arc_helper.map_data import MapMeta
@@ -160,13 +162,16 @@ class MapWindow(QWidget):
         top_l = QHBoxLayout(top)
         top_l.addWidget(QLabel("Map"))
         self._map_menu = QComboBox()
-        maps = []
+        maps: list[tuple[str, str]] = []
         if self.catalog:
-            maps = [(m.map_id, m.display_name) for m in self.catalog.list_maps()]
+            maps = [
+                (m.map_id, m.display_name or map_display_name(m.map_id))
+                for m in self.catalog.list_maps()
+            ]
         if not maps:
-            maps = [(mid, MAP_DISPLAY_NAMES.get(mid, mid)) for mid in MAP_DISPLAY_NAMES]
-        for mid, _name in maps:
-            self._map_menu.addItem(mid, mid)
+            maps = [(str(mid), name) for mid, name in MAP_DISPLAY_NAMES.items()]
+        for mid, name in maps:
+            self._map_menu.addItem(name, mid)
         idx = self._map_menu.findData(self.filter_state.map_id)
         if idx >= 0:
             self._map_menu.setCurrentIndex(idx)
@@ -246,7 +251,11 @@ class MapWindow(QWidget):
                 ids = {m.map_id for m in metas}
                 pick = self.filter_state.map_id
                 if pick not in ids:
-                    pick = "blue-gate" if "blue-gate" in ids else metas[0].map_id
+                    pick = (
+                        MapId.BLUE_GATE
+                        if MapId.BLUE_GATE in ids
+                        else metas[0].map_id
+                    )
                 idx = self._map_menu.findData(pick)
                 if idx >= 0:
                     self._map_menu.setCurrentIndex(idx)

@@ -12,12 +12,13 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-from arc_helper.map_data import CDN_SLUGS
 from arc_helper.map_data import KNOWN_MAP_IDS
 from arc_helper.map_data import LOOSE_CLUSTER_RADIUS
-from arc_helper.map_data import MAP_DISPLAY_NAMES
+from arc_helper.map_data import MapId
+from arc_helper.map_data import cdn_slug
 from arc_helper.map_data import ensure_map_schema
 from arc_helper.map_data import map_dir
+from arc_helper.map_data import map_display_name
 from arc_helper.map_data import maps_dir
 
 METAFORGE_API_BASE = "https://metaforge.app/api/arc-raiders"
@@ -29,15 +30,14 @@ CDN_BASE = "https://cdn.metaforge.app/arc-raiders"
 USER_AGENT = "ARLO/1.0 (Arc Raiders Loot Overlay - https://github.com/Soygen/ARLO)"
 
 # Overview thumbnails on static host use PascalCase + "Tile" (from the map picker).
-_STATIC_UI_TILES = {
-    "blue-gate": "BlueGateTile.webp",
-    "buried-city": "BuriedCityTile.webp",
-    "dam-battlegrounds": "DamBattlegroundsTile.webp",
-    "dam": "DamBattlegroundsTile.webp",
-    "pendola-pass": "PendolaPassTile.webp",
-    "riven-tides": "RivenTidesTile.webp",
-    "spaceport": "SpaceportTile.webp",
-    "stella-montis": "StellaTile.webp",
+_STATIC_UI_TILES: dict[MapId, str] = {
+    MapId.BLUE_GATE: "BlueGateTile.webp",
+    MapId.BURIED_CITY: "BuriedCityTile.webp",
+    MapId.DAM: "DamBattlegroundsTile.webp",
+    MapId.PENDOLA_PASS: "PendolaPassTile.webp",
+    MapId.RIVEN_TIDES: "RivenTidesTile.webp",
+    MapId.SPACEPORT: "SpaceportTile.webp",
+    MapId.STELLA_MONTIS: "StellaTile.webp",
 }
 
 
@@ -71,9 +71,9 @@ class MapTileConfig:
 
 
 # Extracted from Metaforge MapConfigs (surface / default layer).
-MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
-    "dam": MapTileConfig(
-        layer_path="dam/20260112-q85",
+MAP_TILE_CONFIGS: dict[MapId, MapTileConfig] = {
+    MapId.DAM: MapTileConfig(
+        layer_path=f"{MapId.DAM}/20260112-q85",
         # Metaforge logical tileSize is 256; CDN ships 512px retina tiles.
         tile_size=256,
         zoom=3,
@@ -90,8 +90,8 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             2625.3233572578824 / 32,
         ),
     ),
-    "spaceport": MapTileConfig(
-        layer_path="spaceport/20260114-q85",
+    MapId.SPACEPORT: MapTileConfig(
+        layer_path=f"{MapId.SPACEPORT}/20260114-q85",
         tile_size=512,
         zoom=2,
         world_extent=(
@@ -107,15 +107,15 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             9413.25 / 32,
         ),
     ),
-    "buried-city": MapTileConfig(
-        layer_path="buried-city/20260112-q85",
+    MapId.BURIED_CITY: MapTileConfig(
+        layer_path=f"{MapId.BURIED_CITY}/20260112-q85",
         tile_size=512,
         zoom=2,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
         tile_extent=(0.0, 0.0, 512.0, 512.0),
     ),
-    "blue-gate": MapTileConfig(
-        layer_path="blue-gate/20260112-q85",
+    MapId.BLUE_GATE: MapTileConfig(
+        layer_path=f"{MapId.BLUE_GATE}/20260112-q85",
         tile_size=512,
         zoom=2,
         world_extent=(
@@ -131,22 +131,22 @@ MAP_TILE_CONFIGS: dict[str, MapTileConfig] = {
             9613.10436501387 / 32,
         ),
     ),
-    "stella-montis": MapTileConfig(
-        layer_path="stella-montis/v3/default",
+    MapId.STELLA_MONTIS: MapTileConfig(
+        layer_path=f"{MapId.STELLA_MONTIS}/v3/default",
         tile_size=256,
         zoom=3,
         world_extent=(3412.0, 2206.0, 1362.0, 4874.0),
         tile_extent=(3599 / 32, 2071 / 32, 1288 / 32, 5081 / 32),
     ),
-    "riven-tides": MapTileConfig(
-        layer_path="riven-tides/20260428-q85",
+    MapId.RIVEN_TIDES: MapTileConfig(
+        layer_path=f"{MapId.RIVEN_TIDES}/20260428-q85",
         tile_size=512,
         zoom=2,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
         tile_extent=(0.0, 0.0, 512.0, 512.0),
     ),
-    "pendola-pass": MapTileConfig(
-        layer_path="pendola-pass/20261005b-satellite",
+    MapId.PENDOLA_PASS: MapTileConfig(
+        layer_path=f"{MapId.PENDOLA_PASS}/20261005b-satellite",
         tile_size=512,
         zoom=3,
         world_extent=(0.0, 0.0, 16384.0, 16384.0),
@@ -765,7 +765,7 @@ def download_map_assets(
     overview = mdir / "overview.webp"
     if force or not overview.is_file():
         # Prefer dated-layer overview from CDN ui slug, then static picker tile.
-        slug = CDN_SLUGS.get(map_id, map_id)
+        slug = cdn_slug(map_id)
         ok = _download(sess, f"{CDN_BASE}/ui/{slug}.webp", overview)
         if not ok and slug != map_id:
             ok = _download(sess, f"{CDN_BASE}/ui/{map_id}.webp", overview)
@@ -1207,7 +1207,7 @@ def store_map_catalog(
                 """,
                 (
                     map_id,
-                    MAP_DISPLAY_NAMES.get(map_id, map_id),
+                    map_display_name(map_id),
                     lat_min,
                     lat_max,
                     lng_min,
@@ -1350,7 +1350,6 @@ def _store_loose_spot_clusters(
 
 # Re-export for callers that need slug map
 __all__ = [
-    "CDN_SLUGS",
     "KNOWN_MAP_IDS",
     "MAP_TILE_CONFIGS",
     "assets_outdated",

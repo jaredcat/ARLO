@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import sqlite3
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -14,31 +15,46 @@ from .config import APP_DIR
 from .config import DATA_DIR
 from .config import get_settings
 
-# API mapID values that currently return markers
-KNOWN_MAP_IDS: tuple[str, ...] = (
-    "dam",
-    "spaceport",
-    "buried-city",
-    "blue-gate",
-    "stella-montis",
-    "riven-tides",
-    "pendola-pass",
-)
 
-MAP_DISPLAY_NAMES: dict[str, str] = {
-    "dam": "Dam Battlegrounds",
-    "spaceport": "Spaceport",
-    "buried-city": "Buried City",
-    "blue-gate": "The Blue Gate",
-    "stella-montis": "Stella Montis",
-    "riven-tides": "Riven Tides",
-    "pendola-pass": "Pendola Pass",
+class MapId(StrEnum):
+    """Metaforge API ``mapID`` values (single source of truth for map keys)."""
+
+    DAM = "dam"
+    SPACEPORT = "spaceport"
+    BURIED_CITY = "buried-city"
+    BLUE_GATE = "blue-gate"
+    STELLA_MONTIS = "stella-montis"
+    RIVEN_TIDES = "riven-tides"
+    PENDOLA_PASS = "pendola-pass"
+
+
+# API mapID values that currently return markers (order = UI / ingest order)
+KNOWN_MAP_IDS: tuple[MapId, ...] = tuple(MapId)
+
+# Human labels for UI — keyed by MapId, never hardcode the slug in widgets.
+MAP_DISPLAY_NAMES: dict[MapId, str] = {
+    MapId.DAM: "Dam Battlegrounds",
+    MapId.SPACEPORT: "Spaceport",
+    MapId.BURIED_CITY: "Buried City",
+    MapId.BLUE_GATE: "The Blue Gate",
+    MapId.STELLA_MONTIS: "Stella Montis",
+    MapId.RIVEN_TIDES: "Riven Tides",
+    MapId.PENDOLA_PASS: "Pendola Pass",
 }
 
 # CDN path slug when it differs from API mapID
-CDN_SLUGS: dict[str, str] = {
-    "riven-tides": "riventides",
+CDN_SLUGS: dict[MapId, str] = {
+    MapId.RIVEN_TIDES: "riventides",
 }
+
+
+def map_display_name(map_id: str | MapId) -> str:
+    """UI label for a Metaforge map id (falls back to the raw id)."""
+    try:
+        mid = MapId(str(map_id))
+    except ValueError:
+        return str(map_id)
+    return MAP_DISPLAY_NAMES.get(mid, str(mid))
 
 CATEGORIES: tuple[str, ...] = (
     "containers",
@@ -280,8 +296,12 @@ def reference_path(map_id: str) -> Path:
     return overview_path(map_id)
 
 
-def cdn_slug(map_id: str) -> str:
-    return CDN_SLUGS.get(map_id, map_id)
+def cdn_slug(map_id: str | MapId) -> str:
+    try:
+        mid = MapId(str(map_id))
+    except ValueError:
+        return str(map_id)
+    return CDN_SLUGS.get(mid, str(mid))
 
 
 def default_db_path() -> Path:
@@ -974,8 +994,7 @@ class MapCatalog:
         mid = row["map_id"]
         return MapMeta(
             map_id=mid,
-            display_name=row["display_name"]
-            or MAP_DISPLAY_NAMES.get(mid, mid),
+            display_name=row["display_name"] or map_display_name(mid),
             lat_min=float(row["lat_min"] or 0),
             lat_max=float(row["lat_max"] or 1),
             lng_min=float(row["lng_min"] or 0),

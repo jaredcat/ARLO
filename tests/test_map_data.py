@@ -6,14 +6,26 @@ import sqlite3
 
 import pytest
 
+from arc_helper.map_data import KNOWN_MAP_IDS
+from arc_helper.map_data import MAP_DISPLAY_NAMES
 from arc_helper.map_data import MapCatalog
+from arc_helper.map_data import MapId
 from arc_helper.map_data import MapMeta
 from arc_helper.map_data import arc_subcategories_for_item
 from arc_helper.map_data import ensure_map_schema
 from arc_helper.map_data import latlng_to_norm
+from arc_helper.map_data import map_display_name
 from arc_helper.map_data import norm_to_latlng
 from arc_helper.map_data import parse_loot_areas
 from arc_helper.map_data import place_loot_areas
+
+
+def test_map_display_names_cover_all_map_ids():
+    assert set(KNOWN_MAP_IDS) == set(MapId)
+    assert set(MAP_DISPLAY_NAMES) == set(MapId)
+    assert map_display_name(MapId.DAM) == "Dam Battlegrounds"
+    assert map_display_name("buried-city") == "Buried City"
+    assert map_display_name("unknown-map") == "unknown-map"
 
 
 def _seed_db(path) -> MapCatalog:

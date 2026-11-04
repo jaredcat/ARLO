@@ -16,6 +16,7 @@ from .config import APP_DIR
 from .config import get_settings
 from .map_data import MAP_DISPLAY_NAMES
 from .map_data import MapCatalog
+from .map_data import MapId
 from .map_data import MapMeta
 from .map_data import get_map_catalog
 from .map_data import latlng_to_norm
@@ -32,19 +33,23 @@ _TEAL_H_HIGH = 100
 _TEAL_S_LOW = 80
 _TEAL_V_LOW = 80
 
-_MAP_TITLE_TO_ID: dict[str, str] = {
-    "the blue gate": "blue-gate",
-    "blue gate": "blue-gate",
-    "dam battlegrounds": "dam",
-    "the dam": "dam",
-    "dam": "dam",
-    "spaceport": "spaceport",
-    "the spaceport": "spaceport",
-    "buried city": "buried-city",
-    "stella montis": "stella-montis",
-    "riven tides": "riven-tides",
-    "pendola pass": "pendola-pass",
+# OCR / in-game title text → MapId (aliases folded onto MapId consts).
+_MAP_TITLE_TO_ID: dict[str, MapId] = {
+    "the blue gate": MapId.BLUE_GATE,
+    "blue gate": MapId.BLUE_GATE,
+    "dam battlegrounds": MapId.DAM,
+    "the dam": MapId.DAM,
+    "dam": MapId.DAM,
+    "spaceport": MapId.SPACEPORT,
+    "the spaceport": MapId.SPACEPORT,
+    "buried city": MapId.BURIED_CITY,
+    "stella montis": MapId.STELLA_MONTIS,
+    "riven tides": MapId.RIVEN_TIDES,
+    "pendola pass": MapId.PENDOLA_PASS,
 }
+# Also accept the canonical display labels (lowercased).
+for _mid, _label in MAP_DISPLAY_NAMES.items():
+    _MAP_TITLE_TO_ID.setdefault(_label.lower(), _mid)
 
 
 @dataclass
@@ -516,8 +521,8 @@ class MapSyncEngine:
 
         if not map_id and self.catalog:
             maps = self.catalog.list_maps()
-            map_id = maps[0].map_id if maps else "dam"
-        return map_id or "dam"
+            map_id = maps[0].map_id if maps else MapId.DAM
+        return map_id or MapId.DAM
 
     @staticmethod
     def _find_player_in_viewport(
