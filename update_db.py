@@ -796,7 +796,8 @@ def apply_workshop_keep_map(
         parts: list[str] = []
         if loot:
             for chunk in re.split(
-                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", loot
+                r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
+                loot,
             ):
                 chunk = chunk.strip().strip(";").strip()
                 if not chunk:
@@ -877,7 +878,8 @@ def apply_research_keep_map(
         parts: list[str] = []
         if existing:
             for chunk in re.split(
-                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", existing
+                r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
+                existing,
             ):
                 chunk = chunk.strip().strip(";").strip()
                 if not chunk or re.match(r"^Research:", chunk, re.IGNORECASE):
@@ -1060,13 +1062,113 @@ def apply_amplify_keep_map(
         parts: list[str] = []
         if existing:
             for chunk in re.split(
-                r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", existing
+                r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
+                existing,
             ):
                 chunk = chunk.strip().strip(";").strip()
                 if not chunk or re.match(r"^Amplify:", chunk, re.IGNORECASE):
                     continue
                 parts.append(chunk)
         parts.append(amplify_line)
+        out[key] = "; ".join(parts)
+    return out
+
+
+# Workbench recipes whose ingredients should stay Keep (beyond quest turn-ins).
+# Curated on purpose — only gate keys / unique high-end crafts, not every gun recipe.
+CRAFTING_RECIPE_PAGES: tuple[str, ...] = (
+    "Emperor_Gateway_Conduit",
+    "Dolabra",
+)
+
+# Static keep notes for rare mats that aren't a single named recipe page.
+CURATED_CRAFTING_KEEP: dict[str, list[str]] = {
+    # Consumed at Gunsmith to amplify a Tier IV weapon of matching mark.
+    "amplification module mk. i": ["Amplify common Tier IV weapon (1x)"],
+    "amplification module mk. ii": ["Amplify uncommon Tier IV weapon (1x)"],
+    "amplification module mk. iii": ["Amplify rare Tier IV weapon (1x)"],
+    "amplification module mk. iv": ["Amplify epic Tier IV weapon (1x)"],
+    "amplification module mk. v": ["Amplify legendary Tier IV weapon (1x)"],
+}
+
+
+def scrape_crafting_keep_map() -> dict[str, list[str]]:
+    """Item → ``Result Name (Qx)`` from curated wiki craft-result pages."""
+    print("Scraping wiki crafting recipes for keep materials...")
+    keep_map: dict[str, list[str]] = {
+        k: list(v) for k, v in CURATED_CRAFTING_KEEP.items()
+    }
+    recipes_n = 0
+    for page in CRAFTING_RECIPE_PAGES:
+        html = fetch_wiki_page(page)
+        soup = BeautifulSoup(html, "html.parser")
+        for table in soup.find_all("table"):
+            headers = [
+                th.get_text(strip=True).lower() for th in table.find_all("th")
+            ]
+            if "ingredients" not in headers or "result" not in headers:
+                continue
+            item_col = headers.index("ingredients")
+            result_col = headers.index("result")
+            for tr in table.find_all("tr")[1:]:
+                cells = tr.find_all(["td", "th"])
+                if len(cells) <= max(item_col, result_col):
+                    continue
+                ingredients = _parse_wiki_item_quantities(
+                    cells[item_col].get_text(" ", strip=True)
+                )
+                results = _parse_wiki_item_quantities(
+                    cells[result_col].get_text(" ", strip=True)
+                )
+                if not ingredients or not results:
+                    continue
+                result_name = results[0][0].strip()
+                if not result_name:
+                    continue
+                recipes_n += 1
+                for mat_name, qty in ingredients:
+                    keep_map.setdefault(mat_name.lower(), []).append(
+                        f"{result_name} ({qty}x)"
+                    )
+    for key, entries in list(keep_map.items()):
+        keep_map[key] = _dedupe_keep_entries(entries)
+    print(
+        f"  Crafting recipes: {recipes_n} rows, {len(keep_map)} materials"
+    )
+    return keep_map
+
+
+def apply_crafting_keep_map(
+    uses_map: dict[str, str],
+    crafting_map: dict[str, list[str]],
+) -> dict[str, str]:
+    """Merge ``Crafting:`` recipe outputs after Research, before Amplify."""
+    if not crafting_map:
+        return uses_map
+    out = dict(uses_map)
+    for key, entries in crafting_map.items():
+        if not entries:
+            continue
+        crafting_line = "Crafting: " + ", ".join(entries)
+        existing = normalize_keep_labels(out.get(key, ""))
+        parts: list[str] = []
+        amplify_parts: list[str] = []
+        if existing:
+            for chunk in re.split(
+                r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
+                existing,
+            ):
+                chunk = chunk.strip().strip(";").strip()
+                if not chunk:
+                    continue
+                if re.match(r"^Crafting:", chunk, re.IGNORECASE):
+                    continue
+                if re.match(r"^Amplify:", chunk, re.IGNORECASE):
+                    amplify_parts.append(chunk)
+                    continue
+                parts.append(chunk)
+        parts.append(crafting_line)
+        parts.extend(amplify_parts)
         out[key] = "; ".join(parts)
     return out
 
@@ -2064,6 +2166,11 @@ def scrape_wiki_uses() -> dict[str, str]:
     except Exception as e:
         print(f"  Research blueprint costs skipped ({e})")
     try:
+        crafting_map = scrape_crafting_keep_map()
+        uses_map = apply_crafting_keep_map(uses_map, crafting_map)
+    except Exception as e:
+        print(f"  Crafting recipe costs skipped ({e})")
+    try:
         amplify_map = scrape_amplify_keep_map()
         uses_map = apply_amplify_keep_map(uses_map, amplify_map)
     except Exception as e:
@@ -2218,6 +2325,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         "Research: ",
         text,
     )
+    text = re.sub(r"\bCrafting(?!:)\s+", "Crafting: ", text)
     text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
     return text
 
@@ -2285,7 +2393,8 @@ def format_keep_for(
     project_entries: list[str] = []
     if wiki:
         for chunk in re.split(
-            r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)", wiki
+            r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
+            wiki,
         ):
             chunk = chunk.strip().strip(";").strip()
             if not chunk:
@@ -2364,7 +2473,7 @@ _BARE_DISPOSE_ACTIONS = frozenset({
 # keep_for values that mean a real progression hold (not "Quick Use consumable")
 _PROGRESS_KEEP_RE = re.compile(
     r"quests?|projects?|workshop|upgrade|expedition|scrappy|"
-    r"research\s*:|research\s+station|amplify\s*:|"
+    r"research\s*:|research\s+station|crafting\s*:|amplify\s*:|"
     r"flickering\s+flames|\bstage\b",
     re.IGNORECASE,
 )

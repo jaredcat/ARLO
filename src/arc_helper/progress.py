@@ -248,11 +248,11 @@ def save_progress(profile: ProgressProfile, path: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 _SECTION_SPLIT = re.compile(
-    r"(?=(?:Workshop|Quests|Projects|Research|Amplify):)",
+    r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
     re.IGNORECASE,
 )
 _SECTION_HEAD = re.compile(
-    r"^(Workshop|Quests|Projects|Research|Amplify):\s*(.*)$",
+    r"^(Workshop|Quests|Projects|Research|Crafting|Amplify):\s*(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 # "Medical Lab 3 (8x)" / "Doctor's Orders (2x)" / "Trophy Display (10x)"
@@ -266,7 +266,7 @@ _WORKSHOP_ENTRY_RE = re.compile(
 
 _PROGRESS_KEEP_RE = re.compile(
     r"quests?|projects?|workshop|upgrade|expedition|scrappy|"
-    r"research\s*:|research\s+station|amplify\s*:|"
+    r"research\s*:|research\s+station|crafting\s*:|amplify\s*:|"
     r"flickering\s+flames|\bstage\b",
     re.IGNORECASE,
 )
@@ -585,7 +585,7 @@ def _needed_from_entries(
     quest = sum(qty for _, qty in kept_by_kind.get("Quests", []))
     other = sum(
         qty
-        for kind in ("Workshop", "Projects", "Research", "Amplify")
+        for kind in ("Workshop", "Projects", "Research", "Crafting", "Amplify")
         for _, qty in kept_by_kind.get(kind, [])
     )
     return (quest if quest > 0 else None, other if other > 0 else None)
@@ -611,6 +611,8 @@ def _needed_from_keep_for(keep_for: str) -> tuple[int | None, int | None]:
             kind = "Projects"
         elif kind_l == "research":
             kind = "Research"
+        elif kind_l == "crafting":
+            kind = "Crafting"
         elif kind_l == "amplify":
             kind = "Amplify"
         else:
@@ -665,6 +667,8 @@ def _filter_keep_for(
             kind = "Projects"
         elif kind_l == "research":
             kind = "Research"
+        elif kind_l == "crafting":
+            kind = "Crafting"
         elif kind_l == "amplify":
             kind = "Amplify"
         else:
@@ -700,7 +704,7 @@ def _filter_keep_for(
                         project_catalog=project_catalog,
                     ):
                         continue
-                # Amplify: fail open (no account-sync for applied amp nodes yet)
+                # Crafting / Amplify: fail open (no sync for craft counts / amp nodes)
                 kept.append((label, qty))
         if kept:
             kept_by_kind.setdefault(kind, []).extend(kept)
@@ -722,7 +726,14 @@ def _filter_keep_for(
             kept_by_kind["Quests"] = kept + kept_by_kind.get("Quests", [])
 
     rebuilt: list[str] = []
-    for kind in ("Quests", "Workshop", "Projects", "Research", "Amplify"):
+    for kind in (
+        "Quests",
+        "Workshop",
+        "Projects",
+        "Research",
+        "Crafting",
+        "Amplify",
+    ):
         entries = kept_by_kind.get(kind)
         if entries:
             rebuilt.append(f"{kind}: {_format_entries(entries)}")

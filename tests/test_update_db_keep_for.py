@@ -342,7 +342,55 @@ def test_scrape_research_includes_unusable_weapon(monkeypatch):
     assert "Tether Launcher Blueprint" in joined
 
 
+def test_scrape_crafting_keep_map_emperor_couplers(monkeypatch):
+    from update_db import apply_crafting_keep_map
+    from update_db import scrape_crafting_keep_map
+
+    pages = {
+        "Emperor_Gateway_Conduit": """
+        <table>
+          <tr><th>Ingredients</th><th></th><th>Requirements</th><th></th><th>Result</th></tr>
+          <tr>
+            <td>1× ARC Insulated Coupler 1× ARC Conductive Coupler 1× ARC Plated Coupler</td>
+            <td>→</td><td>Workbench 1</td><td>→</td>
+            <td>1× Emperor Gateway Conduit</td>
+          </tr>
+        </table>
+        """,
+        "Dolabra": """
+        <table>
+          <tr><th>Ingredients</th><th></th><th>Requirements</th><th></th><th>Result</th></tr>
+          <tr>
+            <td>3× Shredder Gyro 3× Magnetic Accelerator 2× Vaporizer Regulator</td>
+            <td>→</td><td>Gunsmith 3</td><td>→</td>
+            <td>1× Dolabra</td>
+          </tr>
+        </table>
+        """,
+    }
+    monkeypatch.setattr(
+        "update_db.fetch_wiki_page",
+        lambda title: pages[title],
+    )
+    keep = scrape_crafting_keep_map()
+    assert keep["arc conductive coupler"] == ["Emperor Gateway Conduit (1x)"]
+    assert keep["vaporizer regulator"] == ["Dolabra (2x)"]
+    assert keep["amplification module mk. iii"] == [
+        "Amplify rare Tier IV weapon (1x)"
+    ]
+
+    merged = apply_crafting_keep_map(
+        {"arc conductive coupler": "Quests: Sizing Things Up (1x)"},
+        keep,
+    )
+    text = merged["arc conductive coupler"]
+    assert "Quests: Sizing Things Up (1x)" in text
+    assert "Crafting: Emperor Gateway Conduit (1x)" in text
+    assert text.index("Quests:") < text.index("Crafting:")
+
+
 def test_scrape_amplify_keep_map_fossilized_lightning_anvil(monkeypatch):
+
     from update_db import apply_amplify_keep_map
     from update_db import scrape_amplify_keep_map
 

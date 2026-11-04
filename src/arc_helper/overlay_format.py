@@ -38,6 +38,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         "Research: ",
         text,
     )
+    text = re.sub(r"\bCrafting(?!:)\s+", "Crafting: ", text)
     text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
     return text
 

@@ -91,6 +91,23 @@ def test_filter_all_quests_rewrites_action():
     assert out.action == "Crafting item"
 
 
+def test_crafting_keep_survives_completed_quest():
+    item = Item(
+        name="ARC Conductive Coupler",
+        action="Keep",
+        keep_for=(
+            "Quests: Sizing Things Up (1x); "
+            "Crafting: Emperor Gateway Conduit (1x)"
+        ),
+        sell_price=100,
+    )
+    out = apply_progress(
+        item, ProgressProfile(completed_quests={"sizing-things-up"})
+    )
+    assert out.action == "Keep"
+    assert out.keep_for == "Crafting: Emperor Gateway Conduit (1x)"
+
+
 def test_hand_drill_outpost_done_becomes_crafting_item():
     """Crafting feedstock must not collapse to Recycle after workshop uses end."""
     profile = ProgressProfile(workshop_levels={"outpost room": 2})
