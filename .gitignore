@@ -7,14 +7,19 @@ debug
 
 .claude
 .vscode
+.vs/
 build
 dist
 *.log
 .DS_Store
 
+# Linter / typechecker / test caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
 !.env.example
 .last_wiki_update
-.vs/
 .screencast_restore_token
 account-sync.json
 diag_frame.png

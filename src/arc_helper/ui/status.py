@@ -29,7 +29,7 @@ class StatusWindow(QWidget):
         *,
         on_quit: Callable[[], None] | None = None,
         on_left_click: Callable[[], None] | None = None,
-    ):
+    ) -> None:
         super().__init__(parent)
         self.on_quit = on_quit
         self.on_left_click = on_left_click

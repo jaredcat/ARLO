@@ -33,8 +33,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import html
+import operator
 import re
 import sqlite3
 import sys
@@ -44,6 +46,11 @@ from dataclasses import field
 from datetime import date
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+from typing import Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 try:
     import requests
@@ -86,7 +93,9 @@ QUESTS_DB = ARLO_DB
 PROJECTS_DB = ARLO_DB
 TRADERS_DB = ARLO_DB
 
-USER_AGENT = "ARLO/0.4 (Arc Raiders Loot Overlay - https://github.com/jaredcat/arlo-plus)"
+USER_AGENT = (
+    "ARLO/0.4 (Arc Raiders Loot Overlay - https://github.com/jaredcat/arlo-plus)"
+)
 
 QUICK_USE_CATEGORIES = {"Quick Use", "Shield", "Augment", "Mods", "Ammunition", "Key"}
 MATERIAL_CATEGORIES = {"Basic Material", "Refined Material", "Topside Material"}
@@ -95,6 +104,7 @@ MATERIAL_CATEGORIES = {"Basic Material", "Refined Material", "Topside Material"}
 # =============================================================================
 # Data classes
 # =============================================================================
+
 
 @dataclass
 class GameItem:
@@ -130,7 +140,8 @@ class ScraperStats:
 # MetaForge API
 # =============================================================================
 
-def _api_get(url: str, *, timeout: int = 30):
+
+def _api_get(url: str, *, timeout: int = 30) -> Any:
     resp = requests.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
     resp.raise_for_status()
     return resp.json()
@@ -141,7 +152,8 @@ def _supabase_get(table: str, params: str = "") -> list:
     if params:
         url += f"?{params}"
     resp = requests.get(
-        url, timeout=30,
+        url,
+        timeout=30,
         headers={
             "User-Agent": USER_AGENT,
             "apikey": METAFORGE_SUPABASE_KEY,
@@ -197,6 +209,8 @@ def fetch_wiki_recycle_map() -> dict[str, str]:
         return {}
 
     header_row = loot_table.find("tr")
+    if header_row is None:
+        return {}
     headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
     item_idx = next((i for i, h in enumerate(headers) if h == "item"), None)
     recycle_idx = next((i for i, h in enumerate(headers) if "recycles" in h), None)
@@ -211,7 +225,11 @@ def fetch_wiki_recycle_map() -> dict[str, str]:
             continue
         item_cell = cells[item_idx]
         name_link = item_cell.find("a")
-        name = name_link.get_text(strip=True) if name_link else item_cell.get_text(strip=True)
+        name = (
+            name_link.get_text(strip=True)
+            if name_link
+            else item_cell.get_text(strip=True)
+        )
         if not name:
             continue
         recycles_to = _parse_recycles_to(cells[recycle_idx])
@@ -231,11 +249,19 @@ def fetch_metaforge_recycle_map(all_items: list[dict]) -> dict[str, str]:
         print(f"  Supabase unavailable ({e}), falling back to wiki for recycle data...")
         return fetch_wiki_recycle_map()
 
-    id_to_name = {item["id"]: item["name"] for item in all_items if item.get("id") and item.get("name")}
+    id_to_name = {
+        item["id"]: item["name"]
+        for item in all_items
+        if item.get("id") and item.get("name")
+    }
 
     recycle_raw: dict[str, list[tuple[str, int]]] = {}
     for comp in components:
-        item_id, comp_id, qty = comp.get("item_id", ""), comp.get("component_id", ""), comp.get("quantity", 0)
+        item_id, comp_id, qty = (
+            comp.get("item_id", ""),
+            comp.get("component_id", ""),
+            comp.get("quantity", 0),
+        )
         if item_id and comp_id:
             recycle_raw.setdefault(item_id, []).append((comp_id, qty))
 
@@ -306,9 +332,7 @@ def _quest_prereq_ids(quest: dict, tree_parents: dict[str, list[str]]) -> list[s
     """Collect parent quest ids from manifest + quest-tree."""
     found: list[str] = []
     seen: set[str] = set()
-    for src in (
-        (quest.get("manifest") or {}).get("prerequisites") or [],
-    ):
+    for src in ((quest.get("manifest") or {}).get("prerequisites") or [],):
         if not isinstance(src, dict):
             continue
         qid = str(src.get("quest_id") or "").strip()
@@ -330,7 +354,8 @@ def _quest_requirement_rows(quest: dict) -> list[dict[str, str]]:
     for req in quest.get("required_items") or []:
         if not isinstance(req, dict):
             continue
-        item = req.get("item") if isinstance(req.get("item"), dict) else {}
+        raw_item = req.get("item")
+        item = raw_item if isinstance(raw_item, dict) else {}
         item_id = str(req.get("item_id") or item.get("id") or "").strip()
         item_name = str(item.get("name") or req.get("name") or "").strip()
         qty = req.get("quantity", req.get("count", 1))
@@ -340,13 +365,15 @@ def _quest_requirement_rows(quest: dict) -> list[dict[str, str]]:
             quantity = 1
         if not item_id and not item_name:
             continue
-        rows.append({
-            "quest_id": quest_id,
-            "quest_name": quest_name,
-            "item_id": item_id or item_name,
-            "item_name": item_name or item_id,
-            "quantity": str(quantity),
-        })
+        rows.append(
+            {
+                "quest_id": quest_id,
+                "quest_name": quest_name,
+                "item_id": item_id or item_name,
+                "item_name": item_name or item_id,
+                "quantity": str(quantity),
+            }
+        )
     return rows
 
 
@@ -374,24 +401,28 @@ def build_quest_catalog_rows(
         if not qid or not name:
             continue
         prereqs = _quest_prereq_ids(quest, tree_parents)
-        quest_rows.append({
-            "id": qid,
-            "name": name,
-            "trader_name": str(quest.get("trader_name") or "").strip(),
-            "xp": str(int(quest.get("xp") or 0)),
-            "prerequisites": ";".join(prereqs),
-        })
-        for parent in prereqs:
-            prereq_rows.append({
+        quest_rows.append(
+            {
+                "id": qid,
+                "name": name,
+                "trader_name": str(quest.get("trader_name") or "").strip(),
+                "xp": str(int(quest.get("xp") or 0)),
+                "prerequisites": ";".join(prereqs),
+            }
+        )
+        prereq_rows.extend(
+            {
                 "quest_id": qid,
                 "parent_quest_id": parent,
                 "required_state": "COMPLETED",
-            })
+            }
+            for parent in prereqs
+        )
         req_rows.extend(_quest_requirement_rows(quest))
 
-    quest_rows.sort(key=lambda r: r["id"])
-    req_rows.sort(key=lambda r: (r["quest_id"], r["item_id"]))
-    prereq_rows.sort(key=lambda r: (r["quest_id"], r["parent_quest_id"]))
+    quest_rows.sort(key=operator.itemgetter("id"))
+    req_rows.sort(key=operator.itemgetter("quest_id", "item_id"))
+    prereq_rows.sort(key=operator.itemgetter("quest_id", "parent_quest_id"))
     return quest_rows, req_rows, prereq_rows
 
 
@@ -421,20 +452,21 @@ def write_quests_csv(
 
     out_rows: list[dict[str, str]] = []
     for q in quest_rows:
-        parts: list[str] = []
-        for req in req_by_quest.get(q["id"], []):
-            # item_id:qty:item_name  (name may contain spaces; no pipes)
-            parts.append(
-                f"{req['item_id']}:{req['quantity']}:{req['item_name']}"
-            )
-        out_rows.append({
-            "id": q["id"],
-            "name": q["name"],
-            "trader_name": q["trader_name"],
-            "xp": q["xp"],
-            "prerequisites": q["prerequisites"],
-            "required_items": "|".join(parts),
-        })
+        # item_id:qty:item_name  (name may contain spaces; no pipes)
+        parts: list[str] = [
+            f"{req['item_id']}:{req['quantity']}:{req['item_name']}"
+            for req in req_by_quest.get(q["id"], [])
+        ]
+        out_rows.append(
+            {
+                "id": q["id"],
+                "name": q["name"],
+                "trader_name": q["trader_name"],
+                "xp": q["xp"],
+                "prerequisites": q["prerequisites"],
+                "required_items": "|".join(parts),
+            }
+        )
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -600,21 +632,35 @@ def fetch_metaforge_quest_items(*, persist: bool = True) -> dict[str, list[str]]
 
 def _normalize_category(item_type: str) -> str:
     mapping = {
-        "basic_material": "Basic Material", "refined_material": "Refined Material",
-        "topside_material": "Topside Material", "recyclable": "Recyclable",
-        "trinket": "Trinket", "nature": "Nature", "quick_use": "Quick Use",
-        "key": "Key", "ammunition": "Ammunition", "ammo": "Ammunition",
-        "shield": "Shield", "augment": "Augment",
-        "mods": "Mods", "mod": "Mods", "modification": "Mods",
-        "weapon": "Weapon", "blueprint": "Blueprint",
-        "research_item": "Research Item", "research item": "Research Item",
+        "basic_material": "Basic Material",
+        "refined_material": "Refined Material",
+        "topside_material": "Topside Material",
+        "recyclable": "Recyclable",
+        "trinket": "Trinket",
+        "nature": "Nature",
+        "quick_use": "Quick Use",
+        "key": "Key",
+        "ammunition": "Ammunition",
+        "ammo": "Ammunition",
+        "shield": "Shield",
+        "augment": "Augment",
+        "mods": "Mods",
+        "mod": "Mods",
+        "modification": "Mods",
+        "weapon": "Weapon",
+        "blueprint": "Blueprint",
+        "research_item": "Research Item",
+        "research item": "Research Item",
     }
-    return mapping.get(item_type.lower().strip(), item_type.title() if item_type else "")
+    return mapping.get(
+        item_type.lower().strip(), item_type.title() if item_type else ""
+    )
 
 
 # =============================================================================
 # Wiki scraper
 # =============================================================================
+
 
 def wiki_url(path: str) -> str:
     """Build a wiki page URL from ``WIKI_URL`` + path segment (e.g. ``Quests``)."""
@@ -768,9 +814,7 @@ def scrape_wiki_workshop_keep_map() -> dict[str, list[str]]:
         if key in seen:
             continue
         seen.add(key)
-        keep_map.setdefault(item_name.lower(), []).append(
-            f"{station} {level} ({qty}x)"
-        )
+        keep_map.setdefault(item_name.lower(), []).append(f"{station} {level} ({qty}x)")
 
     room_map = outpost_room_expansion_keep_map()
     for item_key, entries in room_map.items():
@@ -849,15 +893,12 @@ def scrape_research_blueprint_keep_map() -> dict[str, list[str]]:
         for mat_name, qty in ingredients:
             if mat_name.lower() in {"research points", "research point"}:
                 continue
-            keep_map.setdefault(mat_name.lower(), []).append(
-                f"{blueprint} ({qty}x)"
-            )
+            keep_map.setdefault(mat_name.lower(), []).append(f"{blueprint} ({qty}x)")
     # Dedupe per item while keeping order
     for key, entries in list(keep_map.items()):
         keep_map[key] = _dedupe_keep_entries(entries)
     print(
-        f"  Research blueprint costs: {rows_n} recipes, "
-        f"{len(keep_map)} material items"
+        f"  Research blueprint costs: {rows_n} recipes, {len(keep_map)} material items"
     )
     return keep_map
 
@@ -951,7 +992,7 @@ def _weapons_from_amp_stats(stats: str) -> list[str]:
                 continue
             hits.append((span[0], weapon))
             used_spans.append(span)
-    hits.sort(key=lambda t: t[0])
+    hits.sort(key=operator.itemgetter(0))
     # Preserve first-seen casing from the catalog list
     return [w for _, w in hits]
 
@@ -962,9 +1003,7 @@ def scrape_amplification_node_weapons() -> dict[str, list[str]]:
     soup = BeautifulSoup(html, "html.parser")
     table = None
     for candidate in soup.find_all("table"):
-        headers = [
-            th.get_text(strip=True).lower() for th in candidate.find_all("th")
-        ]
+        headers = [th.get_text(strip=True).lower() for th in candidate.find_all("th")]
         if "name" in headers and "stats" in headers:
             table = candidate
             break
@@ -1029,11 +1068,7 @@ def scrape_amplify_keep_map() -> dict[str, list[str]]:
     for node_display, mat, qty in costs:
         key = _normalize_amp_node_key(node_display)
         weapons = node_weapons.get(key) or []
-        labels = (
-            [f"{w} {node_display}" for w in weapons]
-            if weapons
-            else [node_display]
-        )
+        labels = [f"{w} {node_display}" for w in weapons] if weapons else [node_display]
         for label in labels:
             keep_map.setdefault(mat.lower(), []).append(f"{label} ({qty}x)")
             pairs_n += 1
@@ -1103,9 +1138,7 @@ def scrape_crafting_keep_map() -> dict[str, list[str]]:
         html = fetch_wiki_page(page)
         soup = BeautifulSoup(html, "html.parser")
         for table in soup.find_all("table"):
-            headers = [
-                th.get_text(strip=True).lower() for th in table.find_all("th")
-            ]
+            headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
             if "ingredients" not in headers or "result" not in headers:
                 continue
             item_col = headers.index("ingredients")
@@ -1132,9 +1165,7 @@ def scrape_crafting_keep_map() -> dict[str, list[str]]:
                     )
     for key, entries in list(keep_map.items()):
         keep_map[key] = _dedupe_keep_entries(entries)
-    print(
-        f"  Crafting recipes: {recipes_n} rows, {len(keep_map)} materials"
-    )
+    print(f"  Crafting recipes: {recipes_n} rows, {len(keep_map)} materials")
     return keep_map
 
 
@@ -1232,8 +1263,7 @@ def scrape_wiki_quests() -> list[dict]:
         if not header_cells:
             continue
         headers = [
-            th.get_text(strip=True).lower()
-            for th in header_cells.find_all("th")
+            th.get_text(strip=True).lower() for th in header_cells.find_all("th")
         ]
         if "quest" not in headers or "required items" not in headers:
             continue
@@ -1248,9 +1278,7 @@ def scrape_wiki_quests() -> list[dict]:
             q_cell = cells[quest_col]
             link = q_cell.find("a")
             name = (
-                link.get_text(strip=True)
-                if link
-                else q_cell.get_text(" ", strip=True)
+                link.get_text(strip=True) if link else q_cell.get_text(" ", strip=True)
             )
             name = re.sub(r"\s+", " ", name or "").strip()
             if not name:
@@ -1265,11 +1293,13 @@ def scrape_wiki_quests() -> list[dict]:
                 cells[req_col].get_text(" ", strip=True)
             ):
                 item_id = _slugify(item_name)
-                required_items.append({
-                    "item_id": item_id,
-                    "quantity": qty,
-                    "item": {"id": item_id, "name": item_name},
-                })
+                required_items.append(
+                    {
+                        "item_id": item_id,
+                        "quantity": qty,
+                        "item": {"id": item_id, "name": item_name},
+                    }
+                )
 
             existing = by_id.get(qid)
             if existing is None:
@@ -1323,9 +1353,11 @@ def merge_quest_lists(primary: list[dict], secondary: list[dict]) -> list[dict]:
         for req in quest.get("required_items") or []:
             if not isinstance(req, dict):
                 continue
-            iname = str(
-                (req.get("item") or {}).get("name") or req.get("item_id") or ""
-            ).strip().lower()
+            iname = (
+                str((req.get("item") or {}).get("name") or req.get("item_id") or "")
+                .strip()
+                .lower()
+            )
             if iname and iname not in have:
                 extra.append(req)
                 have.add(iname)
@@ -1337,6 +1369,7 @@ def merge_quest_lists(primary: list[dict], secondary: list[dict]) -> list[dict]:
 # =============================================================================
 # Wiki Projects + Traders directories
 # =============================================================================
+
 
 def discover_wiki_directory_links(
     path: str,
@@ -1367,9 +1400,7 @@ def discover_wiki_directory_links(
         header_row = table.find("tr")
         if not header_row:
             continue
-        headers = [
-            th.get_text(strip=True).lower() for th in header_row.find_all("th")
-        ]
+        headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
         if header_key not in headers:
             continue
         col = headers.index(header_key)
@@ -1380,14 +1411,14 @@ def discover_wiki_directory_links(
             link = cells[col].find("a", href=True)
             if not link:
                 continue
-            href = link["href"].split("#")[0]  # page path; fragment used below
+            full = str(link["href"])
+            href = full.split("#", maxsplit=1)[0]  # page path; fragment used below
             fragment = ""
-            full = link["href"]
             if "#" in full:
                 fragment = "#" + full.split("#", 1)[1]
             if not href.startswith("/wiki/"):
                 continue
-            title = href.replace("/wiki/", "").replace("_", " ")
+            href.replace("/wiki/", "").replace("_", " ")
             name = re.sub(r"\s+", " ", link.get_text(strip=True)).strip()
             if not name or name.lower() in skip_titles:
                 continue
@@ -1401,7 +1432,7 @@ def discover_wiki_directory_links(
     return found
 
 
-def _scope_content(soup: BeautifulSoup, project_name: str, href: str):
+def _scope_content(soup: BeautifulSoup, project_name: str, href: str) -> Any:
     """Narrow to a heading section when the directory link targets a fragment
     or a differently-titled page (e.g. Sheltered Retreat → Outpost)."""
     content = soup.select_one("#mw-content-text") or soup
@@ -1417,7 +1448,7 @@ def _scope_content(soup: BeautifulSoup, project_name: str, href: str):
                 heading = h
                 break
     if heading is None:
-        page_title = (soup.title.get_text(strip=True) if soup.title else "")
+        page_title = soup.title.get_text(strip=True) if soup.title else ""
         page_title = page_title.split("-")[0].strip()
         if _slugify(page_title) != _slugify(project_name):
             for h in content.find_all(["h2", "h3"]):
@@ -1428,26 +1459,25 @@ def _scope_content(soup: BeautifulSoup, project_name: str, href: str):
         return content
 
     # Collect siblings until the next same-or-higher heading level
-    level = int(heading.name[1])
+    level = int(str(heading.name)[1])
     parts: list[str] = [str(heading)]
     for sib in heading.next_siblings:
-        if getattr(sib, "name", None) in {"h2", "h3", "h4"}:
-            if int(sib.name[1]) <= level:
+        sib_name = getattr(sib, "name", None)
+        if sib_name in {"h2", "h3", "h4"}:
+            if int(str(sib_name)[1]) <= level:
                 break
-        if getattr(sib, "name", None):
+        if sib_name:
             parts.append(str(sib))
     return BeautifulSoup("".join(parts), "html.parser")
 
 
-def _table_requirement_pairs(table) -> list[tuple[str, int]]:
+def _table_requirement_pairs(table: Any) -> list[tuple[str, int]]:
     """Pull (item_name, qty) from one wiki table."""
     found: list[tuple[str, int]] = []
     header_row = table.find("tr")
     if not header_row:
         return found
-    headers = [
-        th.get_text(strip=True).lower() for th in header_row.find_all("th")
-    ]
+    headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
     if "requirement" in headers:
         col = headers.index("requirement")
         for row in table.find_all("tr")[1:]:
@@ -1455,9 +1485,7 @@ def _table_requirement_pairs(table) -> list[tuple[str, int]]:
             if len(cells) <= col:
                 continue
             found.extend(
-                _parse_wiki_item_quantities(
-                    cells[col].get_text(" ", strip=True)
-                )
+                _parse_wiki_item_quantities(cells[col].get_text(" ", strip=True))
             )
         return found
     # Headerless / odd tables (Converging Paths): whole-cell qty lists
@@ -1465,14 +1493,12 @@ def _table_requirement_pairs(table) -> list[tuple[str, int]]:
         for row in table.find_all("tr"):
             for cell in row.find_all(["td", "th"]):
                 found.extend(
-                    _parse_wiki_item_quantities(
-                        cell.get_text(" ", strip=True)
-                    )
+                    _parse_wiki_item_quantities(cell.get_text(" ", strip=True))
                 )
     return found
 
 
-def _requirements_from_tables(root) -> list[tuple[str, int, int | None]]:
+def _requirements_from_tables(root: Any) -> list[tuple[str, int, int | None]]:
     """Pull requirements from tables outside staged tabber panels.
 
     When a page already has staged tabbers (Trophy Display, Soul's Offering),
@@ -1488,12 +1514,10 @@ def _requirements_from_tables(root) -> list[tuple[str, int, int | None]]:
     return found
 
 
-_TABBER_STAGE_RE = re.compile(
-    r"^(?P<label>.+?)\s*\((?P<stage>\d+)\)\s*$"
-)
+_TABBER_STAGE_RE = re.compile(r"^(?P<label>.+?)\s*\((?P<stage>\d+)\)\s*$")
 
 
-def _tabber_stage_number(panel) -> int | None:
+def _tabber_stage_number(panel: Any) -> int | None:
     """Stage index from tabber tab text like ``Soaring Menaces (2)``."""
     label_id = panel.get("aria-labelledby") or ""
     title = ""
@@ -1518,7 +1542,7 @@ def _tabber_stage_number(panel) -> int | None:
         return None
 
 
-def _tabber_panel_turn_in_pairs(panel) -> list[tuple[str, int]]:
+def _tabber_panel_turn_in_pairs(panel: Any) -> list[tuple[str, int]]:
     """First ``ul`` in a tabber panel when a Rewards heading follows."""
     found: list[tuple[str, int]] = []
     first_ul = None
@@ -1540,14 +1564,12 @@ def _tabber_panel_turn_in_pairs(panel) -> list[tuple[str, int]]:
                 break
     if first_ul is not None and has_rewards_after:
         for li in first_ul.find_all("li", recursive=False):
-            found.extend(
-                _parse_wiki_item_quantities(li.get_text(" ", strip=True))
-            )
+            found.extend(_parse_wiki_item_quantities(li.get_text(" ", strip=True)))
     return found
 
 
 def _requirements_from_tabbers(
-    root,
+    root: Any,
 ) -> list[tuple[str, int, int | None]]:
     """Requirements from staged tabber panels (tables + turn-in lists)."""
     found: list[tuple[str, int, int | None]] = []
@@ -1562,7 +1584,7 @@ def _requirements_from_tabbers(
 
 
 def _aggregate_requirements(
-    pairs: list[tuple[str, int] | tuple[str, int, int | None]],
+    pairs: Sequence[tuple[str, int] | tuple[str, int, int | None]],
 ) -> list[tuple[str, int, int | None]]:
     """Sum quantities per (item, stage); preserve first-seen order."""
     totals: dict[tuple[str, int | None], int] = {}
@@ -1581,7 +1603,7 @@ def _aggregate_requirements(
             order.append(key)
             totals[key] = 0
         totals[key] += qty
-    return [(n, totals[(n, s)], s) for n, s in order]
+    return [(n, totals[n, s], s) for n, s in order]
 
 
 _WIKI_DATE_FORMATS = (
@@ -1675,7 +1697,9 @@ def scrape_wiki_project_page(name: str, href: str) -> dict:
         required_items.append(entry)
     active = project_is_active(schedule)
     if schedule.get("ends_on") and not active:
-        print(f"    (expired {schedule['ends_on']} — kept in catalog, excluded from keep)")
+        print(
+            f"    (expired {schedule['ends_on']} — kept in catalog, excluded from keep)"
+        )
     elif schedule.get("project_type"):
         print(
             f"    ({schedule['project_type']}"
@@ -1730,7 +1754,9 @@ def scrape_wiki_trader_page(name: str, href: str) -> dict:
         if name_el:
             item_name = name_el.get_text(strip=True)
         elif link:
-            item_name = (link.get("title") or link.get_text(strip=True) or "").strip()
+            item_name = str(
+                link.get("title") or link.get_text(strip=True) or ""
+            ).strip()
         item_name = re.sub(r"\s+", " ", item_name).strip()
         if not item_name:
             continue
@@ -1741,11 +1767,13 @@ def scrape_wiki_trader_page(name: str, href: str) -> dict:
         seen.add(item_id)
         price_el = card.select_one(".ic-value")
         price = price_el.get_text(strip=True) if price_el else ""
-        items.append({
-            "item_id": item_id,
-            "item_name": item_name,
-            "price": price,
-        })
+        items.append(
+            {
+                "item_id": item_id,
+                "item_name": item_name,
+                "price": price,
+            }
+        )
     return {"id": _slugify(name), "name": name, "items": items}
 
 
@@ -1790,7 +1818,8 @@ def write_projects_catalog(
         for r in reqs:
             if not isinstance(r, dict):
                 continue
-            item = r.get("item") if isinstance(r.get("item"), dict) else {}
+            raw_item = r.get("item")
+            item = raw_item if isinstance(raw_item, dict) else {}
             item_id = str(r.get("item_id") or item.get("id") or "").strip()
             item_name = str(item.get("name") or "").strip() or item_id
             if not item_id and not item_name:
@@ -1798,10 +1827,8 @@ def write_projects_catalog(
             bit = f"{item_id}:{r.get('quantity')}:{item_name}"
             stage = r.get("stage")
             if stage is not None and str(stage).strip() != "":
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     bit = f"{bit}:{int(stage)}"
-                except (TypeError, ValueError):
-                    pass
             parts.append(bit)
         project_type = str(project.get("project_type") or "").strip()
         starts_on = str(project.get("starts_on") or "").strip()
@@ -1828,7 +1855,8 @@ def write_projects_catalog(
         for req in reqs:
             if not isinstance(req, dict):
                 continue
-            item = req.get("item") if isinstance(req.get("item"), dict) else {}
+            raw_item = req.get("item")
+            item = raw_item if isinstance(raw_item, dict) else {}
             item_id = str(req.get("item_id") or item.get("id") or "").strip()
             item_name = str(item.get("name") or "").strip() or item_id
             try:
@@ -1844,16 +1872,18 @@ def write_projects_catalog(
                     stage_val = int(raw_stage)
                 except (TypeError, ValueError):
                     stage_val = 0
-            req_rows.append({
-                "project_id": pid,
-                "project_name": pname,
-                "item_id": item_id,
-                "item_name": item_name,
-                "quantity": str(qty),
-                "stage": str(stage_val),
-            })
+            req_rows.append(
+                {
+                    "project_id": pid,
+                    "project_name": pname,
+                    "item_id": item_id,
+                    "item_name": item_name,
+                    "quantity": str(qty),
+                    "stage": str(stage_val),
+                }
+            )
 
-    project_rows.sort(key=lambda r: r["id"])
+    project_rows.sort(key=operator.itemgetter("id"))
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -1967,23 +1997,27 @@ def write_traders_catalog(
         if not tid or not tname:
             continue
         items = trader.get("items") or []
-        trader_rows.append({
-            "id": tid,
-            "name": tname,
-            "item_count": str(len(items)),
-        })
+        trader_rows.append(
+            {
+                "id": tid,
+                "name": tname,
+                "item_count": str(len(items)),
+            }
+        )
         for item in items:
             if not isinstance(item, dict):
                 continue
-            item_rows.append({
-                "trader_id": tid,
-                "trader_name": tname,
-                "item_id": str(item.get("item_id") or "").strip(),
-                "item_name": str(item.get("item_name") or "").strip(),
-                "price": str(item.get("price") or "").strip(),
-            })
+            item_rows.append(
+                {
+                    "trader_id": tid,
+                    "trader_name": tname,
+                    "item_id": str(item.get("item_id") or "").strip(),
+                    "item_name": str(item.get("item_name") or "").strip(),
+                    "price": str(item.get("price") or "").strip(),
+                }
+            )
 
-    trader_rows.sort(key=lambda r: r["id"])
+    trader_rows.sort(key=operator.itemgetter("id"))
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -2072,7 +2106,7 @@ def persist_wiki_side_catalogs() -> tuple[dict[str, list[str]], set[str]]:
     return project_map, inactive
 
 
-def _parse_recycles_to(cell) -> str:
+def _parse_recycles_to(cell: Any) -> str:
     if not cell:
         return ""
     text = cell.get_text(" ", strip=True)
@@ -2083,7 +2117,7 @@ def _parse_recycles_to(cell) -> str:
     return ", ".join(p.strip() for p in parts if p.strip())
 
 
-def _parse_uses(cell) -> str:
+def _parse_uses(cell: Any) -> str:
     if not cell:
         return ""
     text = cell.get_text(" ", strip=True)
@@ -2093,7 +2127,7 @@ def _parse_uses(cell) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _parse_int_cell(cell) -> int:
+def _parse_int_cell(cell: Any) -> int:
     if not cell:
         return 0
     text = cell.get_text(strip=True).replace(",", "").strip()
@@ -2124,6 +2158,8 @@ def scrape_wiki_uses() -> dict[str, str]:
         return {}
 
     header_row = loot_table.find("tr")
+    if header_row is None:
+        return {}
     headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
 
     item_col = None
@@ -2146,7 +2182,11 @@ def scrape_wiki_uses() -> dict[str, str]:
 
         item_cell = cells[item_col]
         name_link = item_cell.find("a")
-        name = name_link.get_text(strip=True) if name_link else item_cell.get_text(strip=True)
+        name = (
+            name_link.get_text(strip=True)
+            if name_link
+            else item_cell.get_text(strip=True)
+        )
         if not name:
             continue
 
@@ -2195,17 +2235,26 @@ def fetch_items_from_wiki() -> list[GameItem]:
         return []
 
     header_row = loot_table.find("tr")
+    if header_row is None:
+        return []
     headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
 
     col_map = {}
     for i, h in enumerate(headers):
-        if h == "item": col_map["item"] = i
-        elif h == "rarity": col_map["rarity"] = i
-        elif "recycles" in h: col_map["recycles_to"] = i
-        elif "sell" in h: col_map["sell_price"] = i
-        elif "stack" in h: col_map["stack_size"] = i
-        elif h == "category": col_map["category"] = i
-        elif h == "uses": col_map["uses"] = i
+        if h == "item":
+            col_map["item"] = i
+        elif h == "rarity":
+            col_map["rarity"] = i
+        elif "recycles" in h:
+            col_map["recycles_to"] = i
+        elif "sell" in h:
+            col_map["sell_price"] = i
+        elif "stack" in h:
+            col_map["stack_size"] = i
+        elif h == "category":
+            col_map["category"] = i
+        elif h == "uses":
+            col_map["uses"] = i
 
     items: list[GameItem] = []
     for row in loot_table.find_all("tr")[1:]:
@@ -2213,7 +2262,7 @@ def fetch_items_from_wiki() -> list[GameItem]:
         if len(cells) < 4:
             continue
 
-        def get_cell(key: str):
+        def get_cell(key: str, cells: Any = cells) -> Any:
             idx = col_map.get(key)
             return cells[idx] if idx is not None and idx < len(cells) else None
 
@@ -2221,19 +2270,27 @@ def fetch_items_from_wiki() -> list[GameItem]:
         if not item_cell:
             continue
         name_link = item_cell.find("a")
-        name = name_link.get_text(strip=True) if name_link else item_cell.get_text(strip=True)
+        name = (
+            name_link.get_text(strip=True)
+            if name_link
+            else item_cell.get_text(strip=True)
+        )
         if not name:
             continue
 
-        items.append(GameItem(
-            name=name,
-            rarity=get_cell("rarity").get_text(strip=True) if get_cell("rarity") else "",
-            recycles_to=_parse_recycles_to(get_cell("recycles_to")),
-            sell_price=_parse_int_cell(get_cell("sell_price")),
-            stack_size=_parse_int_cell(get_cell("stack_size")),
-            category=get_cell("category").get_text(strip=True) if get_cell("category") else "",
-            uses=_parse_uses(get_cell("uses")),
-        ))
+        rarity_cell = get_cell("rarity")
+        category_cell = get_cell("category")
+        items.append(
+            GameItem(
+                name=name,
+                rarity=rarity_cell.get_text(strip=True) if rarity_cell else "",
+                recycles_to=_parse_recycles_to(get_cell("recycles_to")),
+                sell_price=_parse_int_cell(get_cell("sell_price")),
+                stack_size=_parse_int_cell(get_cell("stack_size")),
+                category=category_cell.get_text(strip=True) if category_cell else "",
+                uses=_parse_uses(get_cell("uses")),
+            )
+        )
 
     print(f"  Scraped {len(items)} items from wiki")
     return items
@@ -2242,6 +2299,7 @@ def fetch_items_from_wiki() -> list[GameItem]:
 # =============================================================================
 # Hybrid fetch: MetaForge + Wiki enrichment
 # =============================================================================
+
 
 def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
     """Hybrid catalog build — see module docstring / docs/ITEMS.md source-of-truth.
@@ -2290,15 +2348,17 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
             inactive_projects=inactive_projects,
         )
 
-        items.append(GameItem(
-            name=name,
-            rarity=rarity,
-            recycles_to=recycles_to,
-            sell_price=sell_price,
-            stack_size=stack_size,
-            category=category,
-            uses=combined_uses,
-        ))
+        items.append(
+            GameItem(
+                name=name,
+                rarity=rarity,
+                recycles_to=recycles_to,
+                sell_price=sell_price,
+                stack_size=stack_size,
+                category=category,
+                uses=combined_uses,
+            )
+        )
 
     print(f"\n  Processed {len(items)} items (MetaForge + Wiki enrichment)")
     return items
@@ -2307,6 +2367,7 @@ def fetch_items_hybrid(*, persist_side_catalogs: bool = True) -> list[GameItem]:
 # =============================================================================
 # Keep-for formatting / merge
 # =============================================================================
+
 
 def normalize_keep_labels(keep_for: str) -> str:
     """Decode HTML entities and ensure Projects/Quests/Workshop trailing colons."""
@@ -2350,8 +2411,7 @@ def _dedupe_keep_entries(entries: list[str]) -> list[str]:
         elif qty > best[key][1]:
             best[key] = (name, qty)
     return [
-        f"{best[k][0]} ({best[k][1]}x)" if best[k][1] else best[k][0]
-        for k in order
+        f"{best[k][0]} ({best[k][1]}x)" if best[k][1] else best[k][0] for k in order
     ]
 
 
@@ -2439,9 +2499,7 @@ def format_keep_for(
     }
     if staged_bases:
         project_entries = [
-            e
-            for e in project_entries
-            if _entry_label(e).lower() not in staged_bases
+            e for e in project_entries if _entry_label(e).lower() not in staged_bases
         ]
 
     project_entries = _dedupe_keep_entries(project_entries)
@@ -2460,15 +2518,17 @@ def merge_keep_for(old: str, new: str) -> str:
     """Prefer freshly scraped keep_for when present; otherwise keep the old note."""
     new = normalize_keep_labels(new or "")
     old = normalize_keep_labels(old or "")
-    return new if new else old
+    return new or old
 
 
-_BARE_DISPOSE_ACTIONS = frozenset({
-    "recycle",
-    "sell",
-    "trash",
-    "recycle if short on materials; sell otherwise",
-})
+_BARE_DISPOSE_ACTIONS = frozenset(
+    {
+        "recycle",
+        "sell",
+        "trash",
+        "recycle if short on materials; sell otherwise",
+    }
+)
 
 # keep_for values that mean a real progression hold (not "Quick Use consumable")
 _PROGRESS_KEEP_RE = re.compile(
@@ -2512,10 +2572,7 @@ def merge_action(old_action: str, new_action: str, keep_for: str) -> str:
     ):
         return new_action
     # Bare Sell/Recycle → Keep when category rules now say Keep (weapons, blueprints, …)
-    if (
-        is_bare_dispose_action(old_action)
-        and new_lower.startswith("keep")
-    ):
+    if is_bare_dispose_action(old_action) and new_lower.startswith("keep"):
         return new_action
     # Bare Sell/Recycle → neutral Crafting item for recyclable feedstock
     if is_bare_dispose_action(old_action) and new_lower == "crafting item":
@@ -2526,6 +2583,7 @@ def merge_action(old_action: str, new_action: str, keep_for: str) -> str:
 # =============================================================================
 # Action generation
 # =============================================================================
+
 
 def generate_action(item: GameItem) -> tuple[str, str, str]:
     has_uses = bool(item.uses.strip())
@@ -2542,7 +2600,11 @@ def generate_action(item: GameItem) -> tuple[str, str, str]:
     if category == "Key":
         return "Keep", "", "Unlocks locked areas"
     if category == "Quick Use":
-        return ("Keep", recycle_for, keep_for) if has_uses else ("Use", recycle_for, "Quick Use consumable")
+        return (
+            ("Keep", recycle_for, keep_for)
+            if has_uses
+            else ("Use", recycle_for, "Quick Use consumable")
+        )
     if category == "Ammunition":
         return "Keep", "", "Ammo"
     if category in {"Shield", "Augment", "Mods", "Weapon"}:
@@ -2568,11 +2630,21 @@ def generate_action(item: GameItem) -> tuple[str, str, str]:
             )
         return "Convert to research points", recycle_for, keep_for
     if category in MATERIAL_CATEGORIES:
-        return ("Keep", recycle_for, keep_for) if has_uses else ("Keep", recycle_for, f"{category} - crafting ingredient")
+        return (
+            ("Keep", recycle_for, keep_for)
+            if has_uses
+            else ("Keep", recycle_for, f"{category} - crafting ingredient")
+        )
     if category == "Nature":
-        return ("Keep", recycle_for, keep_for) if has_uses else ("Sell", recycle_for, "")
+        return (
+            ("Keep", recycle_for, keep_for) if has_uses else ("Sell", recycle_for, "")
+        )
     if category == "Trinket":
-        return ("Keep until uses complete; sell after", "", keep_for) if has_uses else ("Sell", "", "")
+        return (
+            ("Keep until uses complete; sell after", "", keep_for)
+            if has_uses
+            else ("Sell", "", "")
+        )
     if category == "Recyclable":
         if has_uses:
             return "Keep until uses complete; recycle after", recycle_for, keep_for
@@ -2600,6 +2672,7 @@ def generate_action(item: GameItem) -> tuple[str, str, str]:
 # CSV / DB operations
 # =============================================================================
 
+
 def load_existing_csv(csv_path: Path) -> dict[str, dict[str, str]]:
     existing: dict[str, dict[str, str]] = {}
     if not csv_path.exists():
@@ -2622,6 +2695,7 @@ def load_existing_csv(csv_path: Path) -> dict[str, dict[str, str]]:
 def build_csv_rows(
     items: list[GameItem],
     existing: dict[str, dict[str, str]] | None = None,
+    *,
     merge: bool = False,
 ) -> tuple[list[dict[str, str]], ScraperStats]:
     stats = ScraperStats(items_scraped=len(items))
@@ -2636,24 +2710,30 @@ def build_csv_rows(
         if merge and existing and key in existing:
             old = existing[key]
             merged_keep = merge_keep_for(old["keep_for"], keep_for)
-            rows.append({
-                "name": item.name,
-                # Preserve hand-tuned actions, except bare Recycle/Sell that
-                # contradict a real quest/project/workshop keep_for.
-                "action": merge_action(old["action"], action, merged_keep),
-                "recycle_for": old["recycle_for"] or recycle_for,
-                "keep_for": merged_keep,
-                "sell_price": sell_price,
-                "stack_size": stack_size,
-            })
+            rows.append(
+                {
+                    "name": item.name,
+                    # Preserve hand-tuned actions, except bare Recycle/Sell that
+                    # contradict a real quest/project/workshop keep_for.
+                    "action": merge_action(old["action"], action, merged_keep),
+                    "recycle_for": old["recycle_for"] or recycle_for,
+                    "keep_for": merged_keep,
+                    "sell_price": sell_price,
+                    "stack_size": stack_size,
+                }
+            )
             stats.items_preserved += 1
         else:
-            rows.append({
-                "name": item.name, "action": action,
-                "recycle_for": recycle_for,
-                "keep_for": normalize_keep_labels(keep_for),
-                "sell_price": sell_price, "stack_size": stack_size,
-            })
+            rows.append(
+                {
+                    "name": item.name,
+                    "action": action,
+                    "recycle_for": recycle_for,
+                    "keep_for": normalize_keep_labels(keep_for),
+                    "sell_price": sell_price,
+                    "stack_size": stack_size,
+                }
+            )
             if existing and key not in (existing or {}):
                 stats.items_new += 1
 
@@ -2665,7 +2745,17 @@ def build_csv_rows(
 def write_csv(rows: list[dict[str, str]], csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["name", "action", "recycle_for", "keep_for", "sell_price", "stack_size"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "name",
+                "action",
+                "recycle_for",
+                "keep_for",
+                "sell_price",
+                "stack_size",
+            ],
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -2686,7 +2776,9 @@ def rebuild_database(csv_path: Path, db_path: Path) -> int:
                 stack_size INTEGER
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_items_name ON items(name COLLATE NOCASE)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_items_name ON items(name COLLATE NOCASE)"
+        )
 
         count = 0
         with csv_path.open(encoding="utf-8") as f:
@@ -2705,7 +2797,14 @@ def rebuild_database(csv_path: Path, db_path: Path) -> int:
                     "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
                     "action=excluded.action, recycle_for=excluded.recycle_for, "
                     "keep_for=excluded.keep_for, sell_price=excluded.sell_price, stack_size=excluded.stack_size",
-                    (name, action, recycle_for, keep_for, int(sp) if sp else None, int(ss) if ss else None),
+                    (
+                        name,
+                        action,
+                        recycle_for,
+                        keep_for,
+                        int(sp) if sp else None,
+                        int(ss) if ss else None,
+                    ),
                 )
                 count += 1
 
@@ -2762,31 +2861,37 @@ def rebuild_quests_from_csv(
             name = (row.get("name") or "").strip()
             if not qid or not name:
                 continue
-            quest_rows.append({
-                "id": qid,
-                "name": name,
-                "trader_name": (row.get("trader_name") or "").strip(),
-                "xp": (row.get("xp") or "0").strip() or "0",
-                "prerequisites": (row.get("prerequisites") or "").strip(),
-            })
+            quest_rows.append(
+                {
+                    "id": qid,
+                    "name": name,
+                    "trader_name": (row.get("trader_name") or "").strip(),
+                    "xp": (row.get("xp") or "0").strip() or "0",
+                    "prerequisites": (row.get("prerequisites") or "").strip(),
+                }
+            )
             for parent in (row.get("prerequisites") or "").split(";"):
                 parent = parent.strip()
                 if parent:
-                    prereq_rows.append({
-                        "quest_id": qid,
-                        "parent_quest_id": parent,
-                        "required_state": "COMPLETED",
-                    })
+                    prereq_rows.append(
+                        {
+                            "quest_id": qid,
+                            "parent_quest_id": parent,
+                            "required_state": "COMPLETED",
+                        }
+                    )
             for item_id, item_name, qty, _stage in _parse_encoded_requirements(
                 row.get("required_items") or ""
             ):
-                req_rows.append({
-                    "quest_id": qid,
-                    "quest_name": name,
-                    "item_id": item_id,
-                    "item_name": item_name,
-                    "quantity": str(qty),
-                })
+                req_rows.append(
+                    {
+                        "quest_id": qid,
+                        "quest_name": name,
+                        "item_id": item_id,
+                        "item_name": item_name,
+                        "quantity": str(qty),
+                    }
+                )
     return rebuild_quests_database(quest_rows, req_rows, prereq_rows, db_path)
 
 
@@ -2816,14 +2921,16 @@ def rebuild_projects_from_csv(
                 if stage > 0:
                     entry["stage"] = stage
                 required_items.append(entry)
-            projects.append({
-                "id": pid,
-                "name": name,
-                "project_type": (row.get("project_type") or "").strip(),
-                "starts_on": (row.get("starts_on") or "").strip(),
-                "ends_on": (row.get("ends_on") or "").strip(),
-                "required_items": required_items,
-            })
+            projects.append(
+                {
+                    "id": pid,
+                    "name": name,
+                    "project_type": (row.get("project_type") or "").strip(),
+                    "starts_on": (row.get("starts_on") or "").strip(),
+                    "ends_on": (row.get("ends_on") or "").strip(),
+                    "required_items": required_items,
+                }
+            )
     # Write DB tables only (CSV already exists)
     write_projects_catalog(projects, csv_path=csv_path, db_path=db_path)
     return len(projects)
@@ -2849,11 +2956,13 @@ def rebuild_traders_from_csv(
             item_id = (row.get("item_id") or "").strip()
             if not item_id:
                 continue
-            bucket["items"].append({
-                "item_id": item_id,
-                "item_name": (row.get("item_name") or item_id).strip(),
-                "price": (row.get("price") or "").strip(),
-            })
+            bucket["items"].append(
+                {
+                    "item_id": item_id,
+                    "item_name": (row.get("item_name") or item_id).strip(),
+                    "price": (row.get("price") or "").strip(),
+                }
+            )
     traders = list(by_trader.values())
     write_traders_catalog(traders, csv_path=csv_path, db_path=db_path)
     return len(traders)
@@ -2877,11 +2986,11 @@ def rebuild_arlo_db_from_csvs(*, db_path: Path = ARLO_DB) -> None:
 # CLI
 # =============================================================================
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Update catalog CSVs and arlo.db "
-            "from MetaForge API + Arc Raiders Wiki."
+            "Update catalog CSVs and arlo.db from MetaForge API + Arc Raiders Wiki."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -2893,9 +3002,15 @@ Examples:
   python update_db.py --source api  # MetaForge items/quests; still pulls wiki side catalogs
         """,
     )
-    parser.add_argument("--merge", action="store_true", help="Preserve existing action overrides")
-    parser.add_argument("--dry-run", action="store_true", help="Preview without writing files")
-    parser.add_argument("--csv-only", action="store_true", help="Update CSV only, skip DB rebuild")
+    parser.add_argument(
+        "--merge", action="store_true", help="Preserve existing action overrides"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without writing files"
+    )
+    parser.add_argument(
+        "--csv-only", action="store_true", help="Update CSV only, skip DB rebuild"
+    )
     parser.add_argument(
         "--maps-only",
         action="store_true",
@@ -2962,7 +3077,9 @@ Examples:
         source_name = "Arc Raiders Wiki"
         if persist_side:
             persist_wiki_side_catalogs()
-            fetch_metaforge_quest_items(persist=True)  # still try API; wiki enrich inside
+            fetch_metaforge_quest_items(
+                persist=True
+            )  # still try API; wiki enrich inside
     elif args.source == "api":
         items = fetch_items_from_metaforge_only(persist_side_catalogs=persist_side)
         source_name = "MetaForge API"
@@ -3000,10 +3117,14 @@ Examples:
 
     if args.dry_run:
         print("\n[DRY RUN] Preview of first 20 items:\n")
-        print(f"  {'Name':<35} {'Action':<40} {'Sell':>7} {'Stack':>5}  {'Recycle For':<25}")
+        print(
+            f"  {'Name':<35} {'Action':<40} {'Sell':>7} {'Stack':>5}  {'Recycle For':<25}"
+        )
         print(f"  {'-' * 35} {'-' * 40} {'-' * 7} {'-' * 5}  {'-' * 25}")
         for row in rows[:20]:
-            print(f"  {row['name']:<35} {row['action']:<40} {row.get('sell_price', ''):>7} {row.get('stack_size', ''):>5}  {row['recycle_for']:<25}")
+            print(
+                f"  {row['name']:<35} {row['action']:<40} {row.get('sell_price', ''):>7} {row.get('stack_size', ''):>5}  {row['recycle_for']:<25}"
+            )
         print(f"\n  ... and {len(rows) - 20} more items")
         return
 
@@ -3021,14 +3142,16 @@ Examples:
 
             print("\nUpdating map catalog from Metaforge...")
             store_map_catalog(ARLO_DB, force_assets=False)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"  Map catalog update skipped ({e})")
 
     _mark_updated()
     print("\nDone!")
 
 
-def fetch_items_from_metaforge_only(*, persist_side_catalogs: bool = True) -> list[GameItem]:
+def fetch_items_from_metaforge_only(
+    *, persist_side_catalogs: bool = True
+) -> list[GameItem]:
     """MetaForge-only mode (quests yes; optional wiki projects/traders catalogs)."""
     raw_items = fetch_metaforge_items()
     recycle_map = fetch_metaforge_recycle_map(raw_items)
@@ -3044,19 +3167,22 @@ def fetch_items_from_metaforge_only(*, persist_side_catalogs: bool = True) -> li
         if not name:
             continue
         stat_block = raw.get("stat_block") or {}
-        items.append(GameItem(
-            name=name, rarity=raw.get("rarity", ""),
-            recycles_to=recycle_map.get(name, ""),
-            sell_price=raw.get("value", 0) or 0,
-            stack_size=stat_block.get("stackSize", 0) or 0,
-            category=_normalize_category(raw.get("item_type", "")),
-            uses=format_keep_for(
-                "",
-                quest_map.get(name.lower(), []),
-                project_map.get(name.lower(), []),
-                inactive_projects=inactive_projects,
-            ),
-        ))
+        items.append(
+            GameItem(
+                name=name,
+                rarity=raw.get("rarity", ""),
+                recycles_to=recycle_map.get(name, ""),
+                sell_price=raw.get("value", 0) or 0,
+                stack_size=stat_block.get("stackSize", 0) or 0,
+                category=_normalize_category(raw.get("item_type", "")),
+                uses=format_keep_for(
+                    "",
+                    quest_map.get(name.lower(), []),
+                    project_map.get(name.lower(), []),
+                    inactive_projects=inactive_projects,
+                ),
+            )
+        )
     print(f"  Processed {len(items)} items from MetaForge")
     return items
 
@@ -3080,10 +3206,8 @@ def _should_auto_update() -> bool:
 
 
 def _mark_updated() -> None:
-    try:
+    with contextlib.suppress(OSError):
         LAST_UPDATE_FILE.write_text(str(time.time()), encoding="utf-8")
-    except OSError:
-        pass
 
 
 def auto_update(*, force: bool = False) -> bool:
@@ -3119,7 +3243,7 @@ def auto_update(*, force: bool = False) -> bool:
             from arc_helper.map_ingest import store_map_catalog
 
             store_map_catalog(ARLO_DB, force_assets=False)
-        except Exception as map_err:  # noqa: BLE001
+        except Exception as map_err:
             print(f"  Map catalog update skipped ({map_err})")
         _mark_updated()
 
@@ -3130,7 +3254,7 @@ def auto_update(*, force: bool = False) -> bool:
         )
         return True
 
-    except Exception as e:  # ruff: ignore[blind-except]
+    except Exception as e:
         print(f"  Database update skipped (error: {e})")
         return False
 

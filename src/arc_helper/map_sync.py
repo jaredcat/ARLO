@@ -87,7 +87,9 @@ def player_arrow_template() -> Path:
     if bundled.is_file():
         return bundled
     # Dev tree: repo static/
-    alt = Path(__file__).resolve().parents[2] / "static" / "map_sync" / "player_arrow.png"
+    alt = (
+        Path(__file__).resolve().parents[2] / "static" / "map_sync" / "player_arrow.png"
+    )
     return alt
 
 
@@ -213,7 +215,11 @@ def register_viewport_to_reference(
             interpolation=cv2.INTER_AREA,
         )
 
-    detector = cv2.ORB_create(4000)
+    # ORB_create is a cv2 factory; stubs often omit it.
+    orb_create = getattr(cv2, "ORB_create", None)
+    if orb_create is None:
+        return None
+    detector = orb_create(4000)
     kp1, des1 = detector.detectAndCompute(vp, None)
     kp2, des2 = detector.detectAndCompute(ref, None)
     if des1 is None or des2 is None or len(kp1) < 8 or len(kp2) < 8:
@@ -231,12 +237,17 @@ def register_viewport_to_reference(
     if len(good) < 8:
         return None
 
-    src = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-    dst = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    src = np.array([kp1[m.queryIdx].pt for m in good], dtype=np.float32).reshape(
+        -1, 1, 2
+    )
+    dst = np.array([kp2[m.trainIdx].pt for m in good], dtype=np.float32).reshape(
+        -1, 1, 2
+    )
+    # Runtime may return None; stubs type the matrix as always present.
     affine, inliers = cv2.estimateAffinePartial2D(
         src, dst, method=cv2.RANSAC, ransacReprojThreshold=5.0
     )
-    if affine is None or inliers is None:
+    if affine is None or inliers is None:  # pyright: ignore[reportUnnecessaryComparison]
         return None
     ratio = float(inliers.sum()) / float(len(inliers))
     if ratio < 0.15:
@@ -421,7 +432,7 @@ def crop_map_viewport(full: Image.Image) -> Image.Image:
 class MapSyncEngine:
     """Capture open raid map; register viewport; optionally locate player."""
 
-    def __init__(self, catalog: MapCatalog | None = None):
+    def __init__(self, catalog: MapCatalog | None = None) -> None:
         self.catalog = catalog or get_map_catalog()
         self._last_fix: PlayerFix | None = None
         self._last_reg: ViewportRegistration | None = None
@@ -498,9 +509,7 @@ class MapSyncEngine:
         # Some locales / OCR drops PLACE; ZOOM+PAN together is still map-ish
         return "ZOOM" in text_compact and "PAN" in text_compact
 
-    def _resolve_map_id(
-        self, full: Image.Image, map_id_hint: str | None
-    ) -> str:
+    def _resolve_map_id(self, full: Image.Image, map_id_hint: str | None) -> str:
         # Prefer OCR of the right-panel title so a stale filter hint (e.g. dam)
         # does not win while the player is viewing Blue Gate / etc.
         map_id: str | None = None
@@ -566,7 +575,9 @@ class MapSyncEngine:
         meta = self.catalog.get_meta(map_id) if self.catalog else None
         reference = self.load_reference(map_id)
         if meta is None:
-            logger.warning("No map_meta row for %s — run update_db.py --maps-only", map_id)
+            logger.warning(
+                "No map_meta row for %s — run update_db.py --maps-only", map_id
+            )
             return None
         if reference is None:
             logger.warning(

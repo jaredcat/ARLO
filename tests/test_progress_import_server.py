@@ -179,11 +179,14 @@ def test_format_progress_status():
     assert format_progress_status(imported_mtime=now, now=now) == (
         "Progress: imported just now"
     )
-    assert format_progress_status(
-        imported_mtime=now - 180,
-        metaforge_synced_at=now - 7200,
-        now=now,
-    ) == "Progress: imported 3m ago · MetaForge synced 2h ago"
+    assert (
+        format_progress_status(
+            imported_mtime=now - 180,
+            metaforge_synced_at=now - 7200,
+            now=now,
+        )
+        == "Progress: imported 3m ago · MetaForge synced 2h ago"
+    )
 
 
 def test_account_sync_mtime(tmp_path: Path):

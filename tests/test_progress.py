@@ -1,8 +1,7 @@
 """Tests for MetaForge account-sync import and keep_for progress filtering."""
 
-from pathlib import Path
-
 import json
+from pathlib import Path
 
 from arc_helper.database import Item
 from arc_helper.progress import ProgressProfile
@@ -97,14 +96,11 @@ def test_crafting_keep_survives_completed_quest():
         name="ARC Conductive Coupler",
         action="Keep",
         keep_for=(
-            "Quests: Sizing Things Up (1x); "
-            "Crafting: Emperor Gateway Conduit (1x)"
+            "Quests: Sizing Things Up (1x); Crafting: Emperor Gateway Conduit (1x)"
         ),
         sell_price=100,
     )
-    out = apply_progress(
-        item, ProgressProfile(completed_quests={"sizing-things-up"})
-    )
+    out = apply_progress(item, ProgressProfile(completed_quests={"sizing-things-up"}))
     assert out.action == "Keep"
     assert out.keep_for == "Crafting: Emperor Gateway Conduit (1x)"
 
@@ -316,8 +312,8 @@ def test_future_project_stage_item_not_cleared_when_earlier_stages_done(
     tmp_path: Path,
 ):
     """Mask Fragment (part 3) must stay while only parts 1–2 are mapped done."""
-    from update_db import write_projects_catalog
     from arc_helper.projects import ProjectCatalog
+    from update_db import write_projects_catalog
 
     write_projects_catalog(
         [
@@ -477,9 +473,18 @@ def test_import_includes_stencils():
             "resources": {
                 "blueprints": {
                     "data": {
-                        "blueprints": [{"name": "Anvil", "blueprintId": "anvil-recipe"}],
-                        "designs": [{"name": "Chandelier_01_A", "itemId": "chandelier-design"}],
-                        "stencils": [{"name": "Unlock ItemSkin CommonRed", "itemId": "garnet-stencil"}],
+                        "blueprints": [
+                            {"name": "Anvil", "blueprintId": "anvil-recipe"}
+                        ],
+                        "designs": [
+                            {"name": "Chandelier_01_A", "itemId": "chandelier-design"}
+                        ],
+                        "stencils": [
+                            {
+                                "name": "Unlock ItemSkin CommonRed",
+                                "itemId": "garnet-stencil",
+                            }
+                        ],
                     }
                 }
             },
@@ -499,14 +504,22 @@ def test_overlay_marks_known_blueprint_design_stencil():
         }
     )
     known_bp = apply_progress(
-        Item(name="Anvil Blueprint", action="Keep", keep_for="Learn, sell, or trade to other players"),
+        Item(
+            name="Anvil Blueprint",
+            action="Keep",
+            keep_for="Learn, sell, or trade to other players",
+        ),
         profile,
     )
     assert known_bp.action == "Sell"
     assert "Already know this blueprint" in (known_bp.keep_for or "")
 
     unknown_bp = apply_progress(
-        Item(name="Tempest Blueprint", action="Keep", keep_for="Learn, sell, or trade to other players"),
+        Item(
+            name="Tempest Blueprint",
+            action="Keep",
+            keep_for="Learn, sell, or trade to other players",
+        ),
         profile,
     )
     assert unknown_bp.action == "Keep"

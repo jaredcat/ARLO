@@ -56,57 +56,60 @@ def bookmarklet_js() -> str:
     # Access so https://metaforge.app may POST to http://127.0.0.1 (mixed content
     # exemption + permission prompt).
     return (
-        "(async()=>{"
-        "const dl=data=>{"
-        "const blob=new Blob([JSON.stringify(data,null,2)],"
-        "{type:'application/json'});"
-        "const a=document.createElement('a');"
-        "a.href=URL.createObjectURL(blob);"
-        "a.download='account-sync.json';"
-        "document.body.appendChild(a);a.click();a.remove();"
-        "URL.revokeObjectURL(a.href);"
-        "};"
-        "try{"
-        "if(navigator.permissions&&navigator.permissions.query){"
-        "try{await navigator.permissions.query({name:'loopback-network'});}"
-        "catch(_p){}"
-        "}"
-        "const r=await fetch('__SYNC__',{credentials:'include'});"
-        "if(!r.ok){"
-        "alert('MetaForge account-sync failed ('+r.status+'). "
-        "Log in and Sync your Raider Profile first.');"
-        "return;"
-        "}"
-        "const data=await r.json();"
-        "try{"
-        "const ir=await fetch('http://127.0.0.1:__PORT____PATH__',{"
-        "method:'POST',"
-        "headers:{'Content-Type':'application/json'},"
-        "body:JSON.stringify(data),"
-        "targetAddressSpace:'loopback'"
-        "});"
-        "if(!ir.ok){alert('ARLO import failed ('+ir.status+')');return;}"
-        "const s=await ir.json();"
-        "alert('ARLO updated\\nQuests: '+s.quests"
-        "+'\\nWorkshop: '+s.workshop"
-        "+'\\nProjects: '+s.projects"
-        "+'\\nBlueprints: '+s.blueprints);"
-        "}catch(e){"
-        "dl(data);"
-        "alert('Could not reach ARLO on 127.0.0.1:__PORT__.\\n'"
-        "+'1) Start ARLO\\n'"
-        "+'2) If the browser asks to allow local/loopback network "
-        "access for metaforge.app, choose Allow\\n'"
-        "+'Downloaded account-sync.json as a fallback.');"
-        "}"
-        "}catch(e){"
-        "alert('Could not reach MetaForge. "
-        "Open your Raider Profile while logged in.');"
-        "}"
-        "})();"
-    ).replace("__SYNC__", ACCOUNT_SYNC_URL).replace(
-        "__PORT__", str(IMPORT_PORT)
-    ).replace("__PATH__", IMPORT_PATH)
+        (
+            "(async()=>{"
+            "const dl=data=>{"
+            "const blob=new Blob([JSON.stringify(data,null,2)],"
+            "{type:'application/json'});"
+            "const a=document.createElement('a');"
+            "a.href=URL.createObjectURL(blob);"
+            "a.download='account-sync.json';"
+            "document.body.appendChild(a);a.click();a.remove();"
+            "URL.revokeObjectURL(a.href);"
+            "};"
+            "try{"
+            "if(navigator.permissions&&navigator.permissions.query){"
+            "try{await navigator.permissions.query({name:'loopback-network'});}"
+            "catch(_p){}"
+            "}"
+            "const r=await fetch('__SYNC__',{credentials:'include'});"
+            "if(!r.ok){"
+            "alert('MetaForge account-sync failed ('+r.status+'). "
+            "Log in and Sync your Raider Profile first.');"
+            "return;"
+            "}"
+            "const data=await r.json();"
+            "try{"
+            "const ir=await fetch('http://127.0.0.1:__PORT____PATH__',{"
+            "method:'POST',"
+            "headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify(data),"
+            "targetAddressSpace:'loopback'"
+            "});"
+            "if(!ir.ok){alert('ARLO import failed ('+ir.status+')');return;}"
+            "const s=await ir.json();"
+            "alert('ARLO updated\\nQuests: '+s.quests"
+            "+'\\nWorkshop: '+s.workshop"
+            "+'\\nProjects: '+s.projects"
+            "+'\\nBlueprints: '+s.blueprints);"
+            "}catch(e){"
+            "dl(data);"
+            "alert('Could not reach ARLO on 127.0.0.1:__PORT__.\\n'"
+            "+'1) Start ARLO\\n'"
+            "+'2) If the browser asks to allow local/loopback network "
+            "access for metaforge.app, choose Allow\\n'"
+            "+'Downloaded account-sync.json as a fallback.');"
+            "}"
+            "}catch(e){"
+            "alert('Could not reach MetaForge. "
+            "Open your Raider Profile while logged in.');"
+            "}"
+            "})();"
+        )
+        .replace("__SYNC__", ACCOUNT_SYNC_URL)
+        .replace("__PORT__", str(IMPORT_PORT))
+        .replace("__PATH__", IMPORT_PATH)
+    )
 
 
 def bookmarklet_href() -> str:
@@ -296,8 +299,8 @@ class _ImportHandler(BaseHTTPRequestHandler):
 
     server_version = "ARLOProgressImport/1.0"
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # ruff: ignore[no-self-use]
-        logger.debug("progress-import: " + fmt, *args)
+    def log_message(self, format: str, *args: Any) -> None:
+        logger.debug("progress-import: " + format, *args)
 
     def _send_bytes(
         self,

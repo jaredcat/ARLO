@@ -9,6 +9,7 @@ from PySide6.QtCore import QRect
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPaintEvent
 from PySide6.QtGui import QPen
 from PySide6.QtWidgets import QWidget
 
@@ -32,7 +33,7 @@ class OverlayPin:
 class InGameMapPins(QWidget):
     """Single-window pin overlay over the raid MAP viewport."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pins: list[tuple[float, float, str]] = []
         self._last_key: tuple | None = None
@@ -51,7 +52,7 @@ class InGameMapPins(QWidget):
         self._mapped = False
         QWidget.hide(self)
 
-    def update(
+    def update_pins(
         self,
         *,
         viewport_bbox: tuple[int, int, int, int],
@@ -76,7 +77,9 @@ class InGameMapPins(QWidget):
         min_y = int(min(ys) - pad)
         max_x = int(max(xs) + pad)
         max_y = int(max(ys) + pad)
-        self.setGeometry(QRect(min_x, min_y, max(1, max_x - min_x), max(1, max_y - min_y)))
+        self.setGeometry(
+            QRect(min_x, min_y, max(1, max_x - min_x), max(1, max_y - min_y))
+        )
         # Store positions relative to this widget for paintEvent.
         self._local = [(x - min_x, y - min_y, c) for x, y, c in screen_pts]
         if not self._mapped:
@@ -86,7 +89,9 @@ class InGameMapPins(QWidget):
             self._mapped = True
         self.repaint()
 
-    def paintEvent(self, _event) -> None:  # ruff: ignore[invalid-function-name]
+    def paintEvent(  # ruff: ignore[invalid-function-name]
+        self, _event: QPaintEvent | None
+    ) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)

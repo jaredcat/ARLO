@@ -86,7 +86,7 @@ class _FakeCatalog:
     def __init__(self, markers: list[MapMarker]):
         self._markers = markers
 
-    def loot_areas_for_item(self, _name: str) -> list[str]:  # ruff: ignore[no-self-use]
+    def loot_areas_for_item(self, _name: str) -> list[str]:
         return []
 
     def markers_for_item(self, map_id, item_name, **kwargs):
@@ -197,9 +197,9 @@ def test_resolve_search_ignores_category_checkboxes():
             instance_name="",
         ),
     ]
-    cat = _FakeCatalog(markers)
+    _FakeCatalog(markers)
     # Only containers checked — search should still find the ARC pin by alias.
-    state = MapFilterState(map_id="dam", search="leaper", categories={"containers"})
+    MapFilterState(map_id="dam", search="leaper", categories={"containers"})
     # FakeCatalog doesn't expand aliases; exercise expand_search_needles separately.
     from arc_helper.map_data import expand_search_needles
     from arc_helper.map_data import marker_label
@@ -264,4 +264,3 @@ def test_quest_marker_labels_share_title():
     assert marker_label(objective) == (
         "What We Left Behind — Search 2 containers in the Raider Camp"
     )
-

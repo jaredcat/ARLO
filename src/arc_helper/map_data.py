@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import sqlite3
+from datetime import UTC
 from enum import StrEnum
 from pathlib import Path
 
@@ -48,13 +49,21 @@ CDN_SLUGS: dict[MapId, str] = {
 }
 
 
+def coerce_map_id(map_id: str | MapId) -> MapId | None:
+    """Parse a map id string into ``MapId``, or ``None`` if unknown."""
+    try:
+        return map_id if isinstance(map_id, MapId) else MapId(map_id)
+    except ValueError:
+        return None
+
+
 def map_display_name(map_id: str | MapId) -> str:
     """UI label for a Metaforge map id (falls back to the raw id)."""
-    try:
-        mid = MapId(str(map_id))
-    except ValueError:
+    mid = coerce_map_id(map_id)
+    if mid is None:
         return str(map_id)
     return MAP_DISPLAY_NAMES.get(mid, str(mid))
+
 
 CATEGORIES: tuple[str, ...] = (
     "containers",
@@ -181,10 +190,7 @@ def marker_label(
         if not base:
             base = cat or "pin"
     # Clarify rooms / open spots (not ARC aliases or plain containers)
-    if (
-        cat in {"locations", "events", "nature"}
-        and cat not in base.lower()
-    ):
+    if cat in {"locations", "events", "nature"} and cat not in base.lower():
         pretty_sub = humanize_slug(sub) if ("-" in sub or "_" in sub) else sub
         if (
             pretty_sub
@@ -224,7 +230,7 @@ def expand_search_needles(search: str) -> list[str]:
     # Display name → internal id (Leaper → bison). Prefix match so "leap" works.
     for sub_id, display in ARC_SUBCATEGORY_NAMES.items():
         d = display.lower()
-        if key == d or key == sub_id or d.startswith(key) or key.startswith(d):
+        if key in {d, sub_id} or d.startswith(key) or key.startswith(d):
             if sub_id not in seen:
                 needles.append(sub_id)
                 seen.add(sub_id)
@@ -307,7 +313,7 @@ def cdn_slug(map_id: str | MapId) -> str:
 def default_db_path() -> Path:
     try:
         return get_settings().database_path
-    except Exception:  # ruff: ignore[blind-except]
+    except Exception:
         return APP_DIR / "arlo.db"
 
 
@@ -366,8 +372,7 @@ def ensure_map_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_map_markers_map "
-        "ON map_markers(map_id)"
+        "CREATE INDEX IF NOT EXISTS idx_map_markers_map ON map_markers(map_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_map_markers_cat "
@@ -400,10 +405,7 @@ def ensure_map_schema(conn: sqlite3.Connection) -> None:
         """
     )
     # Older DBs may lack item_id — add idempotently.
-    cols = {
-        r[1]
-        for r in conn.execute("PRAGMA table_info(item_loot_areas)").fetchall()
-    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(item_loot_areas)").fetchall()}
     if "item_id" not in cols:
         conn.execute("ALTER TABLE item_loot_areas ADD COLUMN item_id TEXT")
     conn.execute(
@@ -442,7 +444,7 @@ def ensure_map_schema(conn: sqlite3.Connection) -> None:
 class MapCatalog:
     """Read helpers for map markers + loot-area index."""
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = Path(db_path) if db_path else default_db_path()
 
     def _connect(self) -> sqlite3.Connection:
@@ -767,7 +769,6 @@ class MapCatalog:
                 return False
 
         from datetime import datetime
-        from datetime import timezone
 
         from arc_helper.map_ingest import cluster_loose_spots
         from arc_helper.map_ingest import fetch_item_loose_spots
@@ -777,7 +778,7 @@ class MapCatalog:
         except Exception:
             return False
         clusters = cluster_loose_spots(spots)
-        fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fetched_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._connect() as conn:
             conn.execute(
                 """
@@ -885,8 +886,7 @@ class MapCatalog:
             origin=origin,
         ):
             hay = (
-                f"{m.subcategory} {m.instance_name}"
-                .lower()
+                f"{m.subcategory} {m.instance_name}".lower()
                 .replace("_", " ")
                 .replace("-", " ")
             )
@@ -933,13 +933,17 @@ class MapCatalog:
         with self._connect() as conn:
             # Prefer prefix matches, then contains — items without loot tags included.
             for sql in (
-                "SELECT name FROM item_loot_areas "
-                "WHERE name LIKE ? COLLATE NOCASE "
-                "ORDER BY LENGTH(name) ASC, name COLLATE NOCASE LIMIT ?",
-                "SELECT name FROM item_loot_areas "
-                "WHERE name LIKE ? COLLATE NOCASE "
-                "AND name NOT LIKE ? COLLATE NOCASE "
-                "ORDER BY name COLLATE NOCASE LIMIT ?",
+                (
+                    "SELECT name FROM item_loot_areas "
+                    "WHERE name LIKE ? COLLATE NOCASE "
+                    "ORDER BY LENGTH(name) ASC, name COLLATE NOCASE LIMIT ?"
+                ),
+                (
+                    "SELECT name FROM item_loot_areas "
+                    "WHERE name LIKE ? COLLATE NOCASE "
+                    "AND name NOT LIKE ? COLLATE NOCASE "
+                    "ORDER BY name COLLATE NOCASE LIMIT ?"
+                ),
             ):
                 if "NOT LIKE" in sql:
                     rows = conn.execute(sql, (needle, f"{q}%", limit)).fetchall()
@@ -1023,7 +1027,8 @@ def _map_crs_south_up(map_id: str) -> bool:
     """Per-map lat→image Y rule (lazy import avoids map_ingest cycle)."""
     from arc_helper.map_ingest import MAP_TILE_CONFIGS
 
-    cfg = MAP_TILE_CONFIGS.get(map_id)
+    mid = coerce_map_id(map_id)
+    cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
     return bool(cfg and cfg.crs_south_up)
 
 
@@ -1063,10 +1068,7 @@ def latlng_on_reference(
     the reference PNG (they expand the F8 scene and look like misplaced pins).
     """
     nx, ny = latlng_to_norm(lat, lng, meta)
-    return (
-        -margin <= nx <= 1.0 + margin
-        and -margin <= ny <= 1.0 + margin
-    )
+    return -margin <= nx <= 1.0 + margin and -margin <= ny <= 1.0 + margin
 
 
 def norm_to_latlng(

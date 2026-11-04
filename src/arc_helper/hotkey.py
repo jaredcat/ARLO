@@ -12,6 +12,7 @@ import ctypes
 import os
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from typing import Protocol
 
@@ -38,9 +39,7 @@ class TapHotkeyMonitor(Protocol):
     def consume_press(self) -> bool: ...
 
 
-_FKEY_VK: dict[str, int] = {
-    f"F{i}": 0x70 + (i - 1) for i in range(1, 13)
-}
+_FKEY_VK: dict[str, int] = {f"F{i}": 0x70 + (i - 1) for i in range(1, 13)}
 
 
 class WindowsCtrlShiftMonitor:
@@ -52,7 +51,7 @@ class WindowsCtrlShiftMonitor:
     def stop(self) -> None:
         pass
 
-    def is_held(self) -> bool:  # ruff: ignore[no-self-use]
+    def is_held(self) -> bool:
         try:
             user32 = ctypes.windll.user32
             # VK_CONTROL = 0x11, VK_SHIFT = 0x10; high bit = currently down
@@ -66,7 +65,7 @@ class WindowsCtrlShiftMonitor:
 class PynputCtrlShiftMonitor:
     """Ctrl+Shift held, via a pynput listener (X11)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._pressed: set = set()
         self._listener = None
 
@@ -75,10 +74,10 @@ class PynputCtrlShiftMonitor:
             return
         from pynput import keyboard
 
-        def on_press(key):
+        def on_press(key: object) -> None:
             self._pressed.add(key)
 
-        def on_release(key):
+        def on_release(key: object) -> None:
             self._pressed.discard(key)
 
         self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
@@ -105,7 +104,7 @@ class EvdevKeyMonitor:
 
     RESCAN_INTERVAL_S = 5.0
 
-    def __init__(self, key_name: str):
+    def __init__(self, key_name: str) -> None:
         import evdev
 
         code = evdev.ecodes.ecodes.get(key_name)
@@ -200,7 +199,7 @@ def tk_keysym_to_evdev(keysym: str) -> str:
 class EdgeFromHeld:
     """Rising-edge wrapper around an ``is_held`` poller."""
 
-    def __init__(self, held_fn):
+    def __init__(self, held_fn: Callable[[], bool]) -> None:
         self._held_fn = held_fn
         self._was_held = False
 
@@ -214,7 +213,7 @@ class EdgeFromHeld:
 class WindowsVkTapMonitor:
     """Single virtual-key tap via GetAsyncKeyState (works with game focused)."""
 
-    def __init__(self, vk: int):
+    def __init__(self, vk: int) -> None:
         self.vk = vk
         self._edge = EdgeFromHeld(self._is_held)
 
@@ -237,7 +236,7 @@ class WindowsVkTapMonitor:
 class PynputKeyTapMonitor:
     """Count key presses from a pynput listener (X11)."""
 
-    def __init__(self, keysym: str):
+    def __init__(self, keysym: str) -> None:
         self.keysym = keysym.strip().upper()
         self._listener = None
         self._pending = 0
@@ -249,12 +248,14 @@ class PynputKeyTapMonitor:
 
         target = self.keysym
 
-        def on_press(key):
+        def on_press(key: object) -> None:
             name = None
-            if hasattr(key, "name") and key.name:
-                name = key.name.upper()
-            elif hasattr(key, "char") and key.char:
-                name = key.char.upper()
+            key_name = getattr(key, "name", None)
+            key_char = getattr(key, "char", None)
+            if isinstance(key_name, str) and key_name:
+                name = key_name.upper()
+            elif isinstance(key_char, str) and key_char:
+                name = key_char.upper()
             if name in {target, f"KEY_{target}"}:
                 self._pending += 1
 
@@ -277,7 +278,7 @@ class PynputKeyTapMonitor:
 class EvdevKeyTapMonitor:
     """Evdev rising-edge tap (Wayland — works with game focused)."""
 
-    def __init__(self, key_name: str):
+    def __init__(self, key_name: str) -> None:
         self._held = EvdevKeyMonitor(key_name)
         self._edge = EdgeFromHeld(self._held.is_held)
 

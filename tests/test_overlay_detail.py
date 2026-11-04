@@ -14,7 +14,10 @@ def test_normalize_projects_quests_colon():
     assert normalize_keep_labels("Workshop Research Station 3 (6x)") == (
         "Workshop: Research Station 3 (6x)"
     )
-    assert normalize_keep_labels("Projects: Already Ok (1x)") == "Projects: Already Ok (1x)"
+    assert (
+        normalize_keep_labels("Projects: Already Ok (1x)")
+        == "Projects: Already Ok (1x)"
+    )
     assert normalize_keep_labels("Quests [[Bait Fetch Blast]] (1x)") == (
         "Quests: Bait Fetch Blast (1x)"
     )
@@ -35,8 +38,7 @@ def test_keep_and_recycle_joined_text():
         keep_for="Quests The League (1x)",
     )
     assert text == (
-        f"Quests: The League (1x)\n"
-        f"{RECYCLE_SYMBOL} 4x Canister, 10x Metal Parts"
+        f"Quests: The League (1x)\n{RECYCLE_SYMBOL} 4x Canister, 10x Metal Parts"
     )
 
 

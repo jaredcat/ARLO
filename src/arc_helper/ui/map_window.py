@@ -36,13 +36,13 @@ from arc_helper.config import DATA_DIR
 from arc_helper.map_data import CATEGORIES
 from arc_helper.map_data import CATEGORY_COLORS
 from arc_helper.map_data import MAP_DISPLAY_NAMES
-from arc_helper.map_data import MapId
-from arc_helper.map_data import map_display_name
 from arc_helper.map_data import MapCatalog
+from arc_helper.map_data import MapId
 from arc_helper.map_data import MapMarker
 from arc_helper.map_data import MapMeta
 from arc_helper.map_data import get_map_catalog
 from arc_helper.map_data import latlng_to_norm
+from arc_helper.map_data import map_display_name
 from arc_helper.map_data import marker_label
 from arc_helper.map_data import reference_path
 from arc_helper.map_filter import MapFilterState
@@ -81,7 +81,7 @@ def _pil_to_qpixmap(im: Image.Image) -> QPixmap:
 
 
 class _MapView(QGraphicsView):
-    def __init__(self, window: MapWindow):
+    def __init__(self, window: MapWindow) -> None:
         super().__init__()
         self._win = window
         self.setRenderHints(
@@ -112,7 +112,7 @@ class MapWindow(QWidget):
         filter_state: MapFilterState | None = None,
         on_sync_request: Callable[[], None] | None = None,
         on_filter_change: Callable[[], None] | None = None,
-    ):
+    ) -> None:
         super().__init__(parent)
         self.catalog = catalog or get_map_catalog()
         self.filter_state = filter_state or MapFilterState()
@@ -201,7 +201,9 @@ class MapWindow(QWidget):
         top_l.addWidget(sync_btn)
         root.addWidget(top)
 
-        hint = QLabel("Pins draw on the in-game MAP. This window sets search/filters (F8).")
+        hint = QLabel(
+            "Pins draw on the in-game MAP. This window sets search/filters (F8)."
+        )
         hint.setStyleSheet(f"background: {PANEL}; color: {FG_DIM}; padding: 4px 8px;")
         root.addWidget(hint)
 
@@ -252,9 +254,7 @@ class MapWindow(QWidget):
                 pick = self.filter_state.map_id
                 if pick not in ids:
                     pick = (
-                        MapId.BLUE_GATE
-                        if MapId.BLUE_GATE in ids
-                        else metas[0].map_id
+                        MapId.BLUE_GATE if MapId.BLUE_GATE in ids else metas[0].map_id
                     )
                 idx = self._map_menu.findData(pick)
                 if idx >= 0:
@@ -355,9 +355,7 @@ class MapWindow(QWidget):
 
     def _fit_view(self) -> None:
         if self._basemap_item is not None:
-            self._view.fitInView(
-                self._basemap_item, Qt.AspectRatioMode.KeepAspectRatio
-            )
+            self._view.fitInView(self._basemap_item, Qt.AspectRatioMode.KeepAspectRatio)
 
     def refresh_markers(self) -> None:
         self.push_filter_state()
@@ -380,8 +378,10 @@ class MapWindow(QWidget):
         self._fill_results()
         self._redraw()
         self._schedule_filter_notify()
-        needle = (self.filter_state.item_filter or self.filter_state.search or "").strip()
-        if needle and self.catalog is not None and not self._loose_warm_inflight:
+        needle = (
+            self.filter_state.item_filter or self.filter_state.search or ""
+        ).strip()
+        if needle and not self._loose_warm_inflight:
             map_id = self.filter_state.map_id
             self._loose_warm_inflight = True
             Thread(
@@ -548,7 +548,9 @@ class MapWindow(QWidget):
                 continue
             x, y = nx * iw, ny * ih
             color = QColor(CATEGORY_COLORS.get(m.category, "#ffffff"))
-            ell = self._scene.addEllipse(x - r, y - r, r * 2, r * 2, QPen(Qt.PenStyle.NoPen), color)
+            ell = self._scene.addEllipse(
+                x - r, y - r, r * 2, r * 2, QPen(Qt.PenStyle.NoPen), color
+            )
             self._pin_items.append(ell)
             drawn += 1
 

@@ -45,10 +45,7 @@ def _sample(markers: list[MapMarker], limit: int) -> list[MapMarker]:
     if limit == 1:
         return [markers[0]]
     # Evenly spaced indices so we always return exactly ``limit`` pins.
-    return [
-        markers[int(i * (len(markers) - 1) / (limit - 1))]
-        for i in range(limit)
-    ]
+    return [markers[int(i * (len(markers) - 1) / (limit - 1))] for i in range(limit)]
 
 
 def resolve_markers(
@@ -80,9 +77,7 @@ def resolve_markers(
         # Search/item paths below keep every hit; map_window still only draws
         # markers inside 0..1 of the reference image.
         return [
-            m
-            for m in markers
-            if latlng_on_reference(m.lat, m.lng, meta, margin=0.35)
+            m for m in markers if latlng_on_reference(m.lat, m.lng, meta, margin=0.35)
         ]
 
     if not search and not item:
@@ -102,9 +97,7 @@ def resolve_markers(
     if hasattr(catalog, "resolve_item_ref"):
         ref = catalog.resolve_item_ref(needle, network=False)
     item_needle = ref[1] if ref else needle
-    markers = catalog.markers_for_item(
-        map_id, item_needle, origin=origin, limit=None
-    )
+    markers = catalog.markers_for_item(map_id, item_needle, origin=origin, limit=None)
     seen = {m.id for m in markers}
 
     # Free-text: also match marker names / ARC aliases that aren't item-loot.

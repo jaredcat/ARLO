@@ -35,7 +35,7 @@ def _using_wayland() -> bool:
 class OverlayWindow(QWidget):
     """Click-through tooltip showing item action / keep / recycle."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.settings = get_settings()
         self.dpi_scale = get_dpi_scale()
@@ -151,7 +151,7 @@ class OverlayWindow(QWidget):
             return
         self._bump_hide_timer()
 
-    def show(
+    def show_item(
         self, item_name: str, recommendation: Item | None, *, in_raid: bool = False
     ) -> None:
         """Show item info. Sell price is only shown when ``in_raid`` is True."""

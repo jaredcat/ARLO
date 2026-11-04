@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
+from typing import cast
 
 import requests
 from PIL import Image
@@ -16,6 +17,7 @@ from arc_helper.map_data import KNOWN_MAP_IDS
 from arc_helper.map_data import LOOSE_CLUSTER_RADIUS
 from arc_helper.map_data import MapId
 from arc_helper.map_data import cdn_slug
+from arc_helper.map_data import coerce_map_id
 from arc_helper.map_data import ensure_map_schema
 from arc_helper.map_data import map_dir
 from arc_helper.map_data import map_display_name
@@ -261,7 +263,7 @@ def _content_bbox(
 ) -> tuple[int, int, int, int] | None:
     """Inclusive pixel bbox of non-near-black content, or None if empty."""
     rgba = im.convert("RGBA")
-    alpha = rgba.getchannel("A")
+    rgba.getchannel("A")
     # Luma-ish max channel keeps dark terrain; ignore fully transparent.
     rgb = rgba.convert("RGB")
     extrema = rgb.getextrema()
@@ -273,22 +275,19 @@ def _content_bbox(
         Image.Resampling.BOX,
     )
     px = probe.load()
+    assert px is not None
     w, h = probe.size
     sx = rgb.size[0] / w
     sy = rgb.size[1] / h
     min_x, min_y, max_x, max_y = w, h, -1, -1
     for y in range(h):
         for x in range(w):
-            r, g, b = px[x, y]
+            r, g, b = cast("tuple[int, int, int]", px[x, y])
             if r > threshold or g > threshold or b > threshold:
-                if x < min_x:
-                    min_x = x
-                if y < min_y:
-                    min_y = y
-                if x > max_x:
-                    max_x = x
-                if y > max_y:
-                    max_y = y
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
     if max_x < 0:
         return None
     left = max(0, int(min_x * sx))
@@ -443,7 +442,8 @@ def write_maps_manifest(
     """Write ``data/maps/MANIFEST.json`` with generation date + layer signatures."""
     maps: dict[str, dict[str, object]] = {}
     for map_id in map_ids:
-        cfg = MAP_TILE_CONFIGS.get(map_id)
+        mid = coerce_map_id(map_id)
+        cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
         if cfg is None:
             continue
         entry = tile_config_signature(cfg)
@@ -458,19 +458,22 @@ def write_maps_manifest(
         maps[map_id] = entry
 
     payload = {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "metaforge",
         "maps": maps,
     }
     path = manifest_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return payload
 
 
 def assets_outdated(map_id: str, *, manifest: dict | None = None) -> bool:
     """True when committed/cached basemap does not match current tile config."""
-    cfg = MAP_TILE_CONFIGS.get(map_id)
+    mid = coerce_map_id(map_id)
+    cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
     if cfg is None:
         return False
     ref = map_dir(map_id) / "reference.png"
@@ -481,10 +484,7 @@ def assets_outdated(map_id: str, *, manifest: dict | None = None) -> bool:
     if not isinstance(entry, dict):
         return True
     expected = tile_config_signature(cfg)
-    for key, value in expected.items():
-        if entry.get(key) != value:
-            return True
-    return False
+    return any(entry.get(key) != value for key, value in expected.items())
 
 
 def _session() -> requests.Session:
@@ -493,7 +493,9 @@ def _session() -> requests.Session:
     return s
 
 
-def fetch_map_markers(map_id: str, *, session: requests.Session | None = None) -> list[dict]:
+def fetch_map_markers(
+    map_id: str, *, session: requests.Session | None = None
+) -> list[dict]:
     """GET game-map-data for one mapID."""
     sess = session or _session()
     resp = sess.get(
@@ -514,8 +516,11 @@ def _normalize_marker(raw: dict, map_id: str) -> dict | None:
     if not mid:
         return None
     try:
-        lat = float(raw.get("lat"))
-        lng = float(raw.get("lng"))
+        raw_lat, raw_lng = raw.get("lat"), raw.get("lng")
+        if raw_lat is None or raw_lng is None:
+            return None
+        lat = float(raw_lat)
+        lng = float(raw_lng)
     except (TypeError, ValueError):
         return None
     loot = raw.get("lootAreas")
@@ -628,9 +633,11 @@ def _discover_tile_grid(
 
     # Sparse path (e.g. Pendola): scan the zoom square.
     for x in range(max_n):
-        for y in range(max_n):
-            if _tile_exists(sess, cfg, zoom, x, y, name_fmt):
-                present.append((x, y))
+        present.extend(
+            (x, y)
+            for y in range(max_n)
+            if _tile_exists(sess, cfg, zoom, x, y, name_fmt)
+        )
     if not present:
         return None
     xs = [p[0] for p in present]
@@ -650,7 +657,9 @@ def _stitch_reference(
     Returns ``((width, height), (lat_min, lat_max, lng_min, lng_max))`` for the
     stitched image's CRS coverage.
     """
-    cfg = cfg or MAP_TILE_CONFIGS.get(map_id)
+    if cfg is None:
+        mid = coerce_map_id(map_id)
+        cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
     if cfg is None:
         return None
 
@@ -756,12 +765,13 @@ def download_map_assets(
     *,
     session: requests.Session | None = None,
     force: bool = False,
-) -> dict[str, str | int]:
+) -> dict[str, str | int | float]:
     """Cache overview + reference basemap under data/maps/{map_id}/."""
     sess = session or _session()
     mdir = map_dir(map_id)
     mdir.mkdir(parents=True, exist_ok=True)
-    cfg = MAP_TILE_CONFIGS.get(map_id)
+    mid = coerce_map_id(map_id)
+    cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
     overview = mdir / "overview.webp"
     if force or not overview.is_file():
         # Prefer dated-layer overview from CDN ui slug, then static picker tile.
@@ -769,8 +779,8 @@ def download_map_assets(
         ok = _download(sess, f"{CDN_BASE}/ui/{slug}.webp", overview)
         if not ok and slug != map_id:
             ok = _download(sess, f"{CDN_BASE}/ui/{map_id}.webp", overview)
-        if not ok:
-            tile = _STATIC_UI_TILES.get(map_id)
+        if not ok and mid is not None:
+            tile = _STATIC_UI_TILES.get(mid)
             if tile:
                 _download(sess, f"{STATIC_BASE}/ui/{tile}", overview)
 
@@ -802,7 +812,9 @@ def download_map_assets(
     # Never promote the tiny picker overview as the CV/F8 reference.
     if size is None:
         return {
-            "overview_rel": f"maps/{map_id}/overview.webp" if overview.is_file() else "",
+            "overview_rel": f"maps/{map_id}/overview.webp"
+            if overview.is_file()
+            else "",
             "reference_rel": "",
             "ref_width": 0,
             "ref_height": 0,
@@ -911,15 +923,9 @@ def lookup_item_by_search(
     if not items:
         return None
     q_l = q.lower()
-    exact = [
-        it
-        for it in items
-        if (it.get("name") or "").strip().lower() == q_l
-    ]
+    exact = [it for it in items if (it.get("name") or "").strip().lower() == q_l]
     pool = exact or [
-        it
-        for it in items
-        if (it.get("name") or "").strip().lower().startswith(q_l)
+        it for it in items if (it.get("name") or "").strip().lower().startswith(q_l)
     ]
     if len(pool) != 1 and not exact:
         return None
@@ -958,14 +964,14 @@ def _decode_sveltekit_pool(pool: list) -> object:
             return i
         v = pool[i]
         memo[i] = None  # cycle guard
-        if v is None or isinstance(v, (str, bool, float)):
-            memo[i] = v
-        elif isinstance(v, int):
+        if v is None or isinstance(v, (str, bool, float, int)):
             memo[i] = v
         elif isinstance(v, dict):
             memo[i] = {k: go(val) for k, val in v.items()}
         elif isinstance(v, list):
-            if v and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+            if v and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in v
+            ):
                 if any(isinstance(x, float) for x in v) or (
                     len(v) >= 5 and max(int(x) for x in v) >= len(pool)
                 ):
@@ -1125,7 +1131,8 @@ def store_map_catalog(
                 rows,
             )
 
-            cfg = MAP_TILE_CONFIGS.get(map_id)
+            mid = coerce_map_id(map_id)
+            cfg = MAP_TILE_CONFIGS.get(mid) if mid is not None else None
             # Projection extent must match the stitched reference PNG CRS —
             # never Metaforge tile_bounds alone (those are view padding).
             if cfg is not None:
@@ -1176,7 +1183,9 @@ def store_map_catalog(
                     print(f"  Asset download failed for {map_id}: {e}")
 
             # Prefer CRS of the actual stitched reference when known.
-            if all(k in asset_info for k in ("lat_min", "lat_max", "lng_min", "lng_max")):
+            if all(
+                k in asset_info for k in ("lat_min", "lat_max", "lng_min", "lng_max")
+            ):
                 lat_min = float(asset_info["lat_min"])
                 lat_max = float(asset_info["lat_max"])
                 lng_min = float(asset_info["lng_min"])
@@ -1240,8 +1249,7 @@ def store_map_catalog(
                 conn.commit()
                 tagged = sum(1 for m in loot_index.values() if m.get("loot_areas"))
                 print(
-                    f"  Stored {len(loot_index)} items "
-                    f"({tagged} with loot-area tags)"
+                    f"  Stored {len(loot_index)} items ({tagged} with loot-area tags)"
                 )
                 stats["_loot_areas"] = len(loot_index)
             except Exception as e:  # ruff: ignore[blind-except]
@@ -1254,7 +1262,9 @@ def store_map_catalog(
         if fetch_loose_spots and loot_index:
             # Prefetch only loot-tagged items; others warm lazily on search.
             bulk = {
-                n: m for n, m in loot_index.items() if (m.get("loot_areas") or "").strip()
+                n: m
+                for n, m in loot_index.items()
+                if (m.get("loot_areas") or "").strip()
             }
             print(
                 "Fetching Metaforge loose item spots "
@@ -1300,7 +1310,7 @@ def _store_loose_spot_clusters(
     conn.execute("DELETE FROM map_item_spot_clusters")
     conn.execute("DELETE FROM map_item_spots_meta")
     total_clusters = 0
-    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fetched_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     items = sorted(loot_index.items(), key=lambda kv: kv[0].lower())
     for i, (name, meta) in enumerate(items, start=1):
         item_id = meta["item_id"]
@@ -1355,21 +1365,21 @@ __all__ = [
     "assets_outdated",
     "cluster_loose_spots",
     "download_map_assets",
+    "extent_affine",
     "fetch_item_index",
+    "fetch_item_loose_spots",
     "fetch_item_loot_areas",
     "fetch_item_loot_index",
-    "fetch_item_loose_spots",
     "fetch_map_markers",
+    "infer_reference_bounds_from_tiles",
+    "latlng_to_tile_crs",
     "lookup_item_by_search",
     "read_maps_manifest",
-    "store_map_catalog",
-    "infer_reference_bounds_from_tiles",
     "read_reference_bounds",
+    "store_map_catalog",
     "tile_config_signature",
     "tile_crs_to_latlng",
     "tile_grid_crs_bounds",
-    "latlng_to_tile_crs",
-    "extent_affine",
     "world_extent_bounds",
     "write_maps_manifest",
     "write_reference_bounds",

@@ -7,6 +7,7 @@ import csv
 import difflib
 import re
 import sqlite3
+from contextlib import suppress
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -27,9 +28,7 @@ def _match_key(name: str) -> str:
 
 
 # OCR often swaps these digits/letters (5TH→STH, Mk.1→MKL, …)
-_OCR_FOLD = str.maketrans(
-    {"0": "o", "1": "i", "l": "i", "5": "s", "8": "b"}
-)
+_OCR_FOLD = str.maketrans({"0": "o", "1": "i", "l": "i", "5": "s", "8": "b"})
 
 
 def _ocr_fold_key(name: str) -> str:
@@ -59,9 +58,7 @@ def names_match(a: str, b: str, *, cutoff: float = 0.85) -> bool:
         return False
     ratio = max(
         difflib.SequenceMatcher(None, ka, kb).ratio(),
-        difflib.SequenceMatcher(
-            None, _ocr_fold_key(a), _ocr_fold_key(b)
-        ).ratio(),
+        difflib.SequenceMatcher(None, _ocr_fold_key(a), _ocr_fold_key(b)).ratio(),
     )
     # Short names: allow a single substitution (WIRES↔WIRE5 ≈ 0.8)
     if max(len(ka), len(kb)) <= 6:
@@ -133,11 +130,7 @@ def _pick_row_by_single_ocr_key(
         # OCR dropped a leading chunk (``CHERIII`` → ``Stitcher III``,
         # ``TIONBOX`` → ``Frequency Modulation Box``). Cap is generous because
         # uniqueness is required before we accept a suffix hit.
-        if (
-            len(target) >= 5
-            and ck.endswith(target)
-            and 0 < len(ck) - len(target) <= 18
-        ):
+        if len(target) >= 5 and ck.endswith(target) and 0 < len(ck) - len(target) <= 18:
             suffix_hits.append(row)
         # Query sits inside the catalog key with a short OCR prefix/suffix gap
         # (``TINGMKSURVIVOR`` → ``Looting Mk. 3 (Survivor)``).
@@ -180,9 +173,7 @@ def _pick_row_by_single_ocr_key(
             continue
         ratio = max(
             difflib.SequenceMatcher(None, target, ck).ratio(),
-            difflib.SequenceMatcher(
-                None, folded, _ocr_fold_key(row["name"])
-            ).ratio(),
+            difflib.SequenceMatcher(None, folded, _ocr_fold_key(row["name"])).ratio(),
         )
         if ratio > best_ratio:
             best_ratio = ratio
@@ -274,7 +265,7 @@ class Item(BaseModel):
 class Database:
     """SQLite database handler for items."""
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None) -> None:
         """Initialize database connection."""
         if db_path is None:
             db_path = get_settings().database_path
@@ -441,7 +432,8 @@ class Database:
 
         missing_file = DATA_DIR / "missing_items.csv"
 
-        try:
+        # Fail silently to not interrupt the user
+        with suppress(Exception):
             seen: set[str] = set()
             unique: list[str] = []
             raw_count = 0
@@ -467,8 +459,6 @@ class Database:
                 writer = csv.writer(f, lineterminator="\n")
                 for item in unique:
                     writer.writerow([item])
-        except Exception:  # ruff: ignore[blind-except]
-            pass  # Fail silently to not interrupt the user
 
     @staticmethod
     def _row_to_item(row: sqlite3.Row) -> Item:
@@ -478,8 +468,8 @@ class Database:
             action=row["action"],
             recycle_for=row["recycle_for"],
             keep_for=row["keep_for"],
-            sell_price=row["sell_price"] if "sell_price" in row.keys() else None,
-            stack_size=row["stack_size"] if "stack_size" in row.keys() else None,
+            sell_price=row["sell_price"],
+            stack_size=row["stack_size"],
         )
 
     def get_all_items(self) -> list[Item]:

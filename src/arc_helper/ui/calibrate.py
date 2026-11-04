@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sys
+from contextlib import suppress
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytesseract
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtGui import QImage
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
@@ -43,9 +46,12 @@ from arc_helper.ocr import grab_screen
 from arc_helper.ui import prepare_qt_env
 from arc_helper.ui.platform import apply_overlay_flags
 
+if TYPE_CHECKING:
+    from PIL import Image
+
 
 class _RegionPreview(QWidget):
-    def __init__(self, color: str):
+    def __init__(self, color: str) -> None:
         super().__init__()
         apply_overlay_flags(self, click_through=True)
         self.setStyleSheet(f"background: {color};")
@@ -70,27 +76,28 @@ class RegionEditor(QGroupBox):
         x_label: str = "X",
         y_label: str = "Y",
         parent: QWidget | None = None,
-    ):
+    ) -> None:
         super().__init__(title, parent)
         self.preview = _RegionPreview(color)
         form = QFormLayout(self)
-        self.x = QSpinBox()
-        self.x.setRange(-4000, 8000)
-        self.x.setValue(x)
-        self.y = QSpinBox()
-        self.y.setRange(-4000, 8000)
-        self.y.setValue(y)
-        self.w = QSpinBox()
-        self.w.setRange(1, 4000)
-        self.w.setValue(w)
-        self.h = QSpinBox()
-        self.h.setRange(1, 4000)
-        self.h.setValue(h)
+        # Avoid clobbering QWidget.x()/y() method attributes.
+        self.spin_x = QSpinBox()
+        self.spin_x.setRange(-4000, 8000)
+        self.spin_x.setValue(x)
+        self.spin_y = QSpinBox()
+        self.spin_y.setRange(-4000, 8000)
+        self.spin_y.setValue(y)
+        self.spin_w = QSpinBox()
+        self.spin_w.setRange(1, 4000)
+        self.spin_w.setValue(w)
+        self.spin_h = QSpinBox()
+        self.spin_h.setRange(1, 4000)
+        self.spin_h.setValue(h)
         for label, box in (
-            (x_label, self.x),
-            (y_label, self.y),
-            ("Width", self.w),
-            ("Height", self.h),
+            (x_label, self.spin_x),
+            (y_label, self.spin_y),
+            ("Width", self.spin_w),
+            ("Height", self.spin_h),
         ):
             form.addRow(label, box)
             box.valueChanged.connect(self._on_change)
@@ -104,13 +111,18 @@ class RegionEditor(QGroupBox):
         form.addRow(btns)
 
     def values(self) -> tuple[int, int, int, int]:
-        return self.x.value(), self.y.value(), self.w.value(), self.h.value()
+        return (
+            self.spin_x.value(),
+            self.spin_y.value(),
+            self.spin_w.value(),
+            self.spin_h.value(),
+        )
 
     def set_values(self, x: int, y: int, w: int, h: int) -> None:
-        self.x.setValue(x)
-        self.y.setValue(y)
-        self.w.setValue(w)
-        self.h.setValue(h)
+        self.spin_x.setValue(x)
+        self.spin_y.setValue(y)
+        self.spin_w.setValue(w)
+        self.spin_h.setValue(h)
 
     def as_trigger(self) -> TriggerRegion:
         x, y, w, h = self.values()
@@ -129,7 +141,7 @@ class RegionEditor(QGroupBox):
 
 
 class CalibrationTool(QWidget):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ARLO - Calibration")
         self.resize(640, 860)
@@ -258,7 +270,7 @@ class CalibrationTool(QWidget):
         layout.addLayout(actions)
         layout.addStretch(1)
 
-    def _show_preview(self, image) -> None:
+    def _show_preview(self, image: Image.Image) -> None:
         if image.mode != "RGB":
             image = image.convert("RGB")
         data = image.tobytes("raw", "RGB")
@@ -293,12 +305,10 @@ class CalibrationTool(QWidget):
         self.tooltip.hide_overlay()
 
     def _update_cursor(self) -> None:
-        try:
+        with suppress(Exception):
             c = get_cursor_position()
             ox, oy, w, h = self.tooltip.values()
             self.tooltip.preview.place(c.x + ox, c.y + oy, w, h)
-        except Exception:  # ruff: ignore[blind-except]
-            pass
 
     def _test_tooltip_at_cursor(self) -> None:
         try:
@@ -308,7 +318,7 @@ class CalibrationTool(QWidget):
             image = grab_screen((left, top, left + w, top + h))
             self._show_preview(image)
             processed = self.ocr.preprocess_tooltip(image)
-            text = pytesseract.image_to_string(processed, config="--psm 6")
+            text = str(pytesseract.image_to_string(processed, config="--psm 6") or "")
             item_name = self.ocr.parse_item_name_from_tooltip(text)
             if item_name:
                 self.result.setText(f"✓ Found: '{item_name}'")
@@ -422,7 +432,9 @@ class CalibrationTool(QWidget):
     def _clear_database(self) -> None:
         count = self.db.count()
         if count == 0:
-            QMessageBox.information(self, "Database Empty", "Database is already empty.")
+            QMessageBox.information(
+                self, "Database Empty", "Database is already empty."
+            )
             return
         confirm = QMessageBox.question(
             self,
@@ -435,13 +447,16 @@ class CalibrationTool(QWidget):
             self._refresh_db_count()
             QMessageBox.information(self, "Cleared", "Database cleared successfully.")
 
-    def closeEvent(self, event) -> None:  # ruff: ignore[invalid-function-name]
+    def closeEvent(  # ruff: ignore[invalid-function-name]
+        self, event: QCloseEvent | None
+    ) -> None:
         self.trigger1.hide_overlay()
         self.trigger2.hide_overlay()
         self.tooltip.hide_overlay()
         self.overlay_xy.hide_overlay()
         self._cursor_timer.stop()
-        super().closeEvent(event)
+        if event is not None:
+            super().closeEvent(event)
 
 
 def main() -> None:

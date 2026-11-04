@@ -5,7 +5,10 @@ Screen capture and text extraction using Tesseract.
 
 import re
 import string
+from collections.abc import Sequence
 from difflib import SequenceMatcher
+from typing import Any
+from typing import cast
 
 import numpy as np
 import pytesseract
@@ -54,7 +57,7 @@ class OCREngine:
     # lookup is space-insensitive, so that still resolves correctly.
     NAME_WHITELIST = string.ascii_uppercase
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize OCR engine."""
         settings = get_settings()
 
@@ -151,7 +154,7 @@ class OCREngine:
         """
         return any(self.check_trigger(region) for region in regions)
 
-    def check_trigger_which(self, regions: list[RegionMixin]) -> int | None:
+    def check_trigger_which(self, regions: Sequence[RegionMixin]) -> int | None:
         """
         Check which region (by index) contains the trigger word.
 
@@ -188,7 +191,11 @@ class OCREngine:
 
         # Apply threshold for cleaner text
         threshold = 128
-        gray = gray.point(lambda x: 255 if x > threshold else 0, "1")
+
+        def _binarize(value: float) -> int:
+            return 255 if value > threshold else 0
+
+        gray = gray.point(_binarize, "1")
 
         return gray
 
@@ -334,8 +341,11 @@ class OCREngine:
 
         try:
             # Get text with confidence data
-            data = pytesseract.image_to_data(
-                image, config=config, output_type=pytesseract.Output.DICT
+            data = cast(
+                "dict[str, list[Any]]",
+                pytesseract.image_to_data(
+                    image, config=config, output_type=pytesseract.Output.DICT
+                ),
             )
 
             # Extract text and calculate average confidence
@@ -344,9 +354,14 @@ class OCREngine:
 
             for i, text in enumerate(data["text"]):
                 conf = data["conf"][i]
-                if text.strip() and conf > 0:
-                    texts.append(text.strip())
-                    confidences.append(conf)
+                text_s = str(text).strip()
+                try:
+                    conf_f = float(conf)
+                except (TypeError, ValueError):
+                    continue
+                if text_s and conf_f > 0:
+                    texts.append(text_s)
+                    confidences.append(conf_f)
 
             raw_text = " ".join(texts)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0
@@ -396,7 +411,7 @@ class OCREngine:
         # Extract with limited whitelist for speed using image_to_string (faster than image_to_data)
         config = f'--psm 7 -c tessedit_char_whitelist="{string.ascii_uppercase}"'
         try:
-            text = pytesseract.image_to_string(processed, config=config)
+            text = str(pytesseract.image_to_string(processed, config=config) or "")
             if text:
                 # Fuzzy match - allow for some OCR errors
                 return self._fuzzy_match(text.strip().upper(), self.TRIGGER_WORD)
@@ -455,16 +470,19 @@ class OCREngine:
         intact - a plain pass reads "II" as "Il" or drops it to "I", which
         silently selects the wrong item tier.
         """
-        plain = pytesseract.image_to_string(processed, config="--psm 6")
+        plain = str(pytesseract.image_to_string(processed, config="--psm 6") or "")
         logger.debug(f"Raw tooltip OCR:\n{plain}")
 
         line_count = self._count_name_lines(plain)
         if line_count == 0:
             return None
 
-        whitelisted = pytesseract.image_to_string(
-            processed,
-            config=f"--psm 6 -c tessedit_char_whitelist={self.NAME_WHITELIST}",
+        whitelisted = str(
+            pytesseract.image_to_string(
+                processed,
+                config=f"--psm 6 -c tessedit_char_whitelist={self.NAME_WHITELIST}",
+            )
+            or ""
         )
         name_lines = [ln.strip() for ln in whitelisted.split("\n") if ln.strip()]
         return self._clean_text(" ".join(name_lines[:line_count])) or None
@@ -551,7 +569,7 @@ class OCREngine:
             processed.save(self.debug_dir / "tooltip_processed.png")
 
         try:
-            text = pytesseract.image_to_string(processed, config="--psm 6")
+            text = str(pytesseract.image_to_string(processed, config="--psm 6") or "")
             return self.parse_item_name_from_tooltip(text)
         except pytesseract.TesseractError as e:
             logger.error(f"OCR Error: {e}")
@@ -579,7 +597,7 @@ class OCREngine:
         window = len(target)
         if len(cleaned) <= window + 2:
             return SequenceMatcher(None, cleaned, target).ratio() >= threshold
-        for start in range(0, len(cleaned) - window + 1):
+        for start in range(len(cleaned) - window + 1):
             chunk = cleaned[start : start + window]
             if SequenceMatcher(None, chunk, target).ratio() >= threshold:
                 return True

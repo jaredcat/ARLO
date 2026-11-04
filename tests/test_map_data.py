@@ -41,10 +41,32 @@ def _seed_db(path) -> MapCatalog:
         ("dam", "Dam", 0.0, 100.0, 0.0, 200.0, 3, "", "", 100, 100),
     )
     rows = [
-        ("a", "dam", 10.0, 20.0, "containers", "locker", "Locker", "Industrial, Security", 0, 0),
+        (
+            "a",
+            "dam",
+            10.0,
+            20.0,
+            "containers",
+            "locker",
+            "Locker",
+            "Industrial, Security",
+            0,
+            0,
+        ),
         ("b", "dam", 50.0, 80.0, "containers", "med_crate", "Med", "Medical", 0, 0),
         ("c", "dam", 90.0, 180.0, "nature", "moss", "", "", 0, 0),
-        ("d", "dam", 11.0, 21.0, "containers", "computer", "Computer", "Technological, Electrical", 1, 0),
+        (
+            "d",
+            "dam",
+            11.0,
+            21.0,
+            "containers",
+            "computer",
+            "Computer",
+            "Technological, Electrical",
+            1,
+            0,
+        ),
     ]
     conn.executemany(
         """
@@ -84,7 +106,9 @@ def test_place_loot_areas_drops_arc_source_tag():
 
 def test_query_by_loot_area(tmp_path):
     cat = _seed_db(tmp_path / "t.db")
-    hits = cat.query_markers("dam", categories={"containers"}, loot_areas={"Industrial"})
+    hits = cat.query_markers(
+        "dam", categories={"containers"}, loot_areas={"Industrial"}
+    )
     assert len(hits) == 1
     assert hits[0].instance_name == "Locker"
 
@@ -298,7 +322,7 @@ def test_crop_reference_allows_sparse_content_and_south_up():
     bounds = (0.0, 1000.0, 0.0, 1000.0)
     cropped, new_bounds = crop_reference_to_content(im, bounds, south_up=True)
     assert cropped.size[0] < 1000 and cropped.size[1] < 1000
-    lat_min, lat_max, lng_min, lng_max = new_bounds
+    lat_min, lat_max, lng_min, _lng_max = new_bounds
     # south_up: top of crop is higher lat than bottom; bbox uses a probe resize.
     assert lat_max > lat_min
     assert 850.0 <= lat_max <= 950.0
@@ -342,9 +366,7 @@ def test_maps_manifest_outdated(tmp_path, monkeypatch):
     from arc_helper.map_ingest import write_maps_manifest
 
     monkeypatch.setattr(map_ingest, "maps_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        map_ingest, "map_dir", lambda map_id: tmp_path / map_id
-    )
+    monkeypatch.setattr(map_ingest, "map_dir", lambda map_id: tmp_path / map_id)
     mid = "blue-gate"
     cfg = MAP_TILE_CONFIGS[mid]
     mdir = tmp_path / mid
@@ -358,8 +380,6 @@ def test_maps_manifest_outdated(tmp_path, monkeypatch):
     assert not assets_outdated(mid)
     # Layer path drift → outdated
     manifest = {
-        "maps": {
-            mid: {**tile_config_signature(cfg), "layer_path": "blue-gate/old"}
-        }
+        "maps": {mid: {**tile_config_signature(cfg), "layer_path": "blue-gate/old"}}
     }
     assert assets_outdated(mid, manifest=manifest)

@@ -14,7 +14,14 @@ from .base import ScreenBackend
 from .base import ScreenCaptureUnavailable
 from .base import choose_backend_name
 
-__all__ = ["Point", "ScreenBackend", "ScreenCaptureUnavailable", "get_backend", "phys_to_tk", "reset_backend"]
+__all__ = [
+    "Point",
+    "ScreenBackend",
+    "ScreenCaptureUnavailable",
+    "get_backend",
+    "phys_to_tk",
+    "reset_backend",
+]
 
 _backend: ScreenBackend | None = None  # ruff: ignore[non-empty-init-module]
 _lock = threading.Lock()  # ruff: ignore[non-empty-init-module]

@@ -24,8 +24,8 @@ import gi
 
 gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import Gio  # ruff: ignore[module-import-not-at-top-of-file]
-from gi.repository import GLib  # ruff: ignore[module-import-not-at-top-of-file]
+from gi.repository import Gio  # pyright: ignore[reportAttributeAccessIssue]  # GI stubs incomplete  # ruff: ignore[module-import-not-at-top-of-file]
+from gi.repository import GLib  # pyright: ignore[reportAttributeAccessIssue]  # GI stubs incomplete  # ruff: ignore[module-import-not-at-top-of-file]
 
 from arc_helper.config import logger  # ruff: ignore[module-import-not-at-top-of-file]
 
@@ -60,7 +60,7 @@ class ScreenCastSession:
     session. It is NOT set by our own close().
     """
 
-    def __init__(self, restore_token: str | None = None):
+    def __init__(self, restore_token: str | None = None) -> None:
         self.restore_token = restore_token
         self.new_restore_token: str | None = None
         self.node_id: int | None = None
@@ -214,7 +214,9 @@ class ScreenCastSession:
         finally:
             self._context.pop_thread_default()
 
-    def _call_on_loop(self, func: Callable[[], object], *, timeout: float = 5.0) -> object:
+    def _call_on_loop(
+        self, func: Callable[[], object], *, timeout: float = 5.0
+    ) -> object:
         """Run ``func`` on the private-context thread and wait for its return.
 
         Required for ``signal_subscribe``: GIO attaches the callback to the
@@ -286,7 +288,10 @@ class ScreenCastSession:
     # ------------------------------------------------------------------
 
     def _request(
-        self, method: str, build_args: Callable[[str], GLib.Variant], timeout: float = RESPONSE_TIMEOUT_S
+        self,
+        method: str,
+        build_args: Callable[[str], GLib.Variant],
+        timeout: float = RESPONSE_TIMEOUT_S,
     ) -> dict:
         """Call a request-style portal method, wait for its Response signal."""
         assert self._bus is not None
@@ -298,14 +303,26 @@ class ScreenCastSession:
         event = threading.Event()
         outcome: dict = {}
 
-        def on_response(_conn, _sender, _path, _iface, _signal, params):
-            code, results = params.unpack()
+        def on_response(
+            _conn: object,
+            _sender: object,
+            _path: object,
+            _iface: object,
+            _signal: object,
+            params: object,
+        ) -> None:
+            unpack = getattr(params, "unpack", None)
+            if unpack is None:
+                return
+            code, results = unpack()
             outcome["code"] = code
             outcome["results"] = results
             event.set()
 
+        bus = self._bus
+
         def subscribe() -> int:
-            return self._bus.signal_subscribe(
+            return bus.signal_subscribe(
                 PORTAL_BUS,
                 REQUEST_IFACE,
                 "Response",
@@ -319,7 +336,7 @@ class ScreenCastSession:
         assert isinstance(sub, int)
         try:
             try:
-                self._bus.call_sync(
+                bus.call_sync(
                     PORTAL_BUS,
                     PORTAL_OBJECT,
                     SCREENCAST_IFACE,
@@ -347,7 +364,7 @@ class ScreenCastSession:
                     raise PortalError(msg)
         finally:
             with suppress(Exception):
-                self._call_on_loop(lambda: self._bus.signal_unsubscribe(sub))
+                self._call_on_loop(lambda: bus.signal_unsubscribe(sub))
 
         code = outcome["code"]
         if code == 1:
@@ -360,13 +377,21 @@ class ScreenCastSession:
 
     def _subscribe_closed(self) -> None:
         assert self._bus is not None
+        bus = self._bus
 
-        def on_closed(_conn, _sender, _path, _iface, _signal, _params):
+        def on_closed(
+            _conn: object,
+            _sender: object,
+            _path: object,
+            _iface: object,
+            _signal: object,
+            _params: object,
+        ) -> None:
             logger.warning("ScreenCast session closed by the compositor/user")
             self.closed.set()
 
         def subscribe() -> int:
-            return self._bus.signal_subscribe(
+            return bus.signal_subscribe(
                 PORTAL_BUS,
                 SESSION_IFACE,
                 "Closed",

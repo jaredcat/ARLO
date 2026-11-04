@@ -12,7 +12,7 @@ from .base import Point
 class MssBackend:
     """The pre-Wayland behavior, unchanged. name is 'windows' or 'x11'."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
 
     def start(self) -> None:
@@ -25,7 +25,7 @@ class MssBackend:
     def tk_scale(self) -> float:
         return 1.0
 
-    def grab(self, bbox: tuple[int, int, int, int]) -> Image.Image:  # ruff: ignore[no-self-use]
+    def grab(self, bbox: tuple[int, int, int, int]) -> Image.Image:
         import mss
 
         left, top, right, bottom = bbox
@@ -39,7 +39,7 @@ class MssBackend:
             screenshot = sct.grab(monitor)
             return Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
-    def cursor_position(self) -> Point:  # ruff: ignore[no-self-use]
+    def cursor_position(self) -> Point:
         if sys.platform == "win32":
             # Ensure we're DPI aware to get physical coordinates
             ctypes.windll.user32.SetProcessDPIAware()
@@ -58,7 +58,7 @@ class MssBackend:
         pos = pynput_mouse.Controller().position
         return Point(x=int(pos[0]), y=int(pos[1]))
 
-    def resolution(self) -> tuple[int, int]:  # ruff: ignore[no-self-use]
+    def resolution(self) -> tuple[int, int]:
         if sys.platform == "win32":
             user32 = ctypes.windll.user32
             user32.SetProcessDPIAware()

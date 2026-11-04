@@ -6,6 +6,10 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
 
 logger = logging.getLogger("arc_helper")
 
@@ -58,7 +62,8 @@ def prepare_qt_env() -> None:
                         "overlays may not stay above the game; F8 still works)"
                     )
 
-def apply_overlay_flags(window, *, click_through: bool = True) -> None:
+
+def apply_overlay_flags(window: QWidget, *, click_through: bool = True) -> None:
     """Frameless, always-on-top, bypass WM (override-redirect on X11)."""
     from PySide6.QtCore import Qt
 
@@ -79,7 +84,7 @@ def apply_overlay_flags(window, *, click_through: bool = True) -> None:
         window.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, on=True)
 
 
-def make_click_through(window) -> None:
+def make_click_through(window: QWidget) -> None:
     """Platform click-through for a realized native window (best-effort)."""
     try:
         window.winId()  # ensure native handle
@@ -99,7 +104,9 @@ def _windows_click_through(hwnd: int) -> None:
     ws_ex_transparent = 0x00000020
     user32 = ctypes.windll.user32
     style = user32.GetWindowLongPtrW(hwnd, gwl_exstyle)
-    user32.SetWindowLongPtrW(hwnd, gwl_exstyle, style | ws_ex_layered | ws_ex_transparent)
+    user32.SetWindowLongPtrW(
+        hwnd, gwl_exstyle, style | ws_ex_layered | ws_ex_transparent
+    )
 
 
 def _x11_click_through(xid: int) -> None:
@@ -115,7 +122,8 @@ def _x11_click_through(xid: int) -> None:
         root_id = xdisplay.screen().root.id
         xwindow = xdisplay.create_resource_object("window", xid)
         while xwindow.id != root_id:
-            xwindow.shape_rectangles(
+            # python-xlib SHAPE extension; stubs omit shape_rectangles.
+            xwindow.shape_rectangles(  # pyright: ignore[reportAttributeAccessIssue]
                 shape.SO.Set, shape.SK.Input, X.Unsorted, 0, 0, []
             )
             parent = xwindow.query_tree().parent

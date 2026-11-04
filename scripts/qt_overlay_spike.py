@@ -46,6 +46,7 @@ COLORS = ["#4aa3ff", "#ffc400", "#ff5e9e", "#59d97a", "#ff8a3d", "#c77dff"]
 
 # --- LayerShellQt via ctypes (no Python bindings exist) -----------------------
 
+
 class _QMargins(ctypes.Structure):
     _fields_ = [
         ("left", ctypes.c_int),
@@ -84,7 +85,11 @@ def apply_layer_shell(widget: QWidget, rect: QRect) -> str:
     layer_overlay = 3
     anchor_top, anchor_left = 1, 4
     kb_none = 0
-    call("_ZN12LayerShellQt6Window8setLayerENS0_5LayerE", layer_overlay, argtypes=[ctypes.c_int])
+    call(
+        "_ZN12LayerShellQt6Window8setLayerENS0_5LayerE",
+        layer_overlay,
+        argtypes=[ctypes.c_int],
+    )
     call(
         "_ZN12LayerShellQt6Window10setAnchorsE6QFlagsINS0_6AnchorEE",
         anchor_top | anchor_left,
@@ -106,6 +111,7 @@ def apply_layer_shell(widget: QWidget, rect: QRect) -> str:
 
 
 # --- overlay ------------------------------------------------------------------
+
 
 class Overlay(QWidget):
     def __init__(self, args: argparse.Namespace, rect: QRect):
@@ -166,7 +172,7 @@ class Overlay(QWidget):
         self._randomise()
         self.update()
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         t0 = time.perf_counter()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -235,20 +241,26 @@ class ClickTarget(QLabel):
             "If this count goes up, click-through works."
         )
 
-    def mousePressEvent(self, _event) -> None:  # noqa: N802
+    def mousePressEvent(self, _event) -> None:
         self.clicks += 1
         self._render()
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", choices=["xcb", "wayland", "layershell"], required=True)
+    ap.add_argument(
+        "--backend", choices=["xcb", "wayland", "layershell"], required=True
+    )
     ap.add_argument("--rect", default="400,200,1200,800", help="x,y,w,h physical px")
     ap.add_argument("--dots", type=int, default=60)
     ap.add_argument("--hz", type=float, default=10.0)
     ap.add_argument("--seconds", type=float, default=60.0)
-    ap.add_argument("--window-type", choices=["tool", "tooltip", "bypass"], default="tool")
-    ap.add_argument("--target", action="store_true", help="open a click-counting window")
+    ap.add_argument(
+        "--window-type", choices=["tool", "tooltip", "bypass"], default="tool"
+    )
+    ap.add_argument(
+        "--target", action="store_true", help="open a click-counting window"
+    )
     ap.add_argument("--out", default="debug/qt_spike_results.jsonl")
     args = ap.parse_args()
 

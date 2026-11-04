@@ -16,15 +16,19 @@ from dataclasses import field
 from enum import Enum
 from enum import auto
 from pathlib import Path
+from threading import ExceptHookArgs
 from threading import Thread
+from types import TracebackType
 from typing import ClassVar
 
+import numpy as np
 from dotenv import load_dotenv
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import QWidget
 
 from arc_helper.config import APP_DIR
+from arc_helper.config import Settings
 from arc_helper.config import SettingsManager
 from arc_helper.config import get_settings
 from arc_helper.config import logger
@@ -45,15 +49,9 @@ from arc_helper.map_sync import ViewportRegistration
 from arc_helper.map_sync import capture_map_thumb
 from arc_helper.map_sync import latlng_to_screen
 from arc_helper.map_sync import thumbs_differ
+from arc_helper.ocr import OCREngine
 from arc_helper.ocr import OCREngineManager
 from arc_helper.ocr import get_ocr_engine
-from arc_helper.ui import InGameMapPins
-from arc_helper.ui import MapWindow
-from arc_helper.ui import OverlayPin
-from arc_helper.ui import OverlayWindow
-from arc_helper.ui import StatusWindow
-from arc_helper.ui import prepare_qt_env
-from arc_helper.ui.platform import apply_overlay_flags
 from arc_helper.progress import ProgressProfile
 from arc_helper.progress import apply_progress
 from arc_helper.progress import load_progress
@@ -73,6 +71,13 @@ from arc_helper.resolution_profiles import get_profile_manager
 from arc_helper.screen import ScreenCaptureUnavailable
 from arc_helper.traders import TraderCatalog
 from arc_helper.traders import get_trader_catalog
+from arc_helper.ui import InGameMapPins
+from arc_helper.ui import MapWindow
+from arc_helper.ui import OverlayPin
+from arc_helper.ui import OverlayWindow
+from arc_helper.ui import StatusWindow
+from arc_helper.ui import prepare_qt_env
+from arc_helper.ui.platform import apply_overlay_flags
 
 # How long the startup / post-import progress flash stays on the status pill.
 _PROGRESS_FLASH_MS = 5000
@@ -92,7 +97,7 @@ class ScannerState(Enum):
 class DebugOverlay(QWidget):
     """Semi-transparent overlay showing the tooltip capture area."""
 
-    def __init__(self, settings):
+    def __init__(self, settings: Settings) -> None:
         super().__init__()
         self.settings = settings
         apply_overlay_flags(self, click_through=True)
@@ -104,7 +109,7 @@ class DebugOverlay(QWidget):
         self.show()
 
     def _update_position(self) -> None:
-        try:
+        with suppress(Exception):
             from arc_helper.ocr import get_cursor_position
 
             cursor = get_cursor_position()
@@ -113,11 +118,10 @@ class DebugOverlay(QWidget):
             w = self.settings.tooltip_capture.width
             h = self.settings.tooltip_capture.height
             self.setGeometry(int(x), int(y), int(w), int(h))
-        except Exception:  # noqa: BLE001
-            pass
 
-    def destroy(self):
-        self.window.destroy()
+    def teardown(self) -> None:
+        """Close the debug overlay (avoid QWidget.destroy override)."""
+        self.close()
 
 
 @dataclass
@@ -298,9 +302,7 @@ class Scanner:
                                 self.ui_queue.put(("map_mode", True))
                                 continue
                             if self._inventory_closed(ocr, settings):
-                                self._enter_idle(
-                                    "INVENTORY closed - returning to idle"
-                                )
+                                self._enter_idle("INVENTORY closed - returning to idle")
                                 continue
 
                     # Scan tooltip at cursor position
@@ -338,7 +340,7 @@ class Scanner:
         self._update_status("scanning")
         logger.info(reason)
 
-    def _inventory_closed(self, ocr, settings) -> bool:
+    def _inventory_closed(self, ocr: OCREngine, settings: Settings) -> bool:
         """True if the INVENTORY trigger is gone.
 
         On Wayland, a single failed OCR of the trigger word was bouncing
@@ -388,8 +390,10 @@ class Scanner:
 
         # Wayland: same item (OCR-tolerant) → heartbeat only, no remount.
         # Also bypasses cooldown so a short DISPLAY_TIME cannot dismiss us.
-        if self._wayland_stable and self._last_shown_item and names_match(
-            item_name, self._last_shown_item
+        if (
+            self._wayland_stable
+            and self._last_shown_item
+            and names_match(item_name, self._last_shown_item)
         ):
             self.ui_queue.put(("overlay_keep",))
             self._last_shown_time = current_time
@@ -446,7 +450,7 @@ class Scanner:
 class Application:
     """Main application controller."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the application."""
         # Load settings
         self.settings = get_settings()
@@ -483,7 +487,10 @@ class Application:
             logger.info("Trader catalog loaded")
 
         prepare_qt_env()
-        self.app = QApplication.instance() or QApplication(sys.argv)
+        existing = QApplication.instance()
+        self.app = (
+            existing if isinstance(existing, QApplication) else QApplication(sys.argv)
+        )
         self.app.setQuitOnLastWindowClosed(False)
         self.root = None
 
@@ -502,8 +509,8 @@ class Application:
         self._map_motion_busy = False
         self._map_motion_timer: QTimer | None = None
         self._map_settle_timer: QTimer | None = None
-        self._map_thumb = None
-        self._map_pins_drawn_for_thumb = None
+        self._map_thumb: np.ndarray | None = None
+        self._map_pins_drawn_for_thumb: np.ndarray | None = None
         self._map_miss_streak = 0
         self._map_motion_streak = 0
         # Fast motion poll; ORB only after the viewport stops changing.
@@ -675,7 +682,7 @@ class Application:
 
         Thread(target=_worker, daemon=True, name="map-motion").start()
 
-    def _on_map_thumb(self, thumb) -> None:
+    def _on_map_thumb(self, thumb: np.ndarray | None) -> None:
         if not self._map_pins_active:
             return
         from arc_helper.map_sync import MOTION_STREAK_REQUIRED
@@ -756,9 +763,7 @@ class Application:
 
         def _worker() -> None:
             try:
-                reg = self.map_sync.register_once(
-                    map_id_hint=hint, detect_player=False
-                )
+                reg = self.map_sync.register_once(map_id_hint=hint, detect_player=False)
                 frame = self._build_pin_frame(reg, filter_snap)
                 self.ui_queue.put(("map_pins_frame", frame))
             except Exception as e:  # ruff: ignore[blind-except]
@@ -784,10 +789,7 @@ class Application:
         if meta is None:
             return None
 
-        if state is None:
-            state = self.map_filter.snapshot()
-        else:
-            state = state.snapshot()
+        state = self.map_filter.snapshot() if state is None else state.snapshot()
         state.map_id = reg.map_id
         # Keep shared filter map_id in sync with OCR/registration
         if reg.map_id and reg.map_id != self.map_filter.map_id:
@@ -852,12 +854,12 @@ class Application:
         try:
             if self.map_tap.consume_press():
                 self._toggle_map_window()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # ruff: ignore[blind-except]
             logger.warning("Map hotkey poll failed: %s", e)
         try:
             if self.map_find_tap.consume_press():
                 self._find_last_item_on_map()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # ruff: ignore[blind-except]
             logger.warning("Map-find hotkey poll failed: %s", e)
 
         try:
@@ -867,7 +869,7 @@ class Application:
                     self._apply_status(msg[1])
                 elif msg[0] == "overlay":
                     self._last_overlay_item = msg[1]
-                    self.overlay.show(msg[1], msg[2], in_raid=msg[3])
+                    self.overlay.show_item(msg[1], msg[2], in_raid=msg[3])
                 elif msg[0] == "overlay_keep":
                     self.overlay.keep_alive()
                 elif msg[0] == "overlay_hide":
@@ -919,7 +921,7 @@ class Application:
         finally:
             self.map_window.set_suspend_filter_notify(suspended=False)
 
-        self.map_pins.update(viewport_bbox=reg.viewport_bbox, pins=pins)
+        self.map_pins.update_pins(viewport_bbox=reg.viewport_bbox, pins=pins)
         # Remember the thumb we drew for — skip re-ORB until it moves again.
         if self._map_thumb is not None:
             self._map_pins_drawn_for_thumb = self._map_thumb.copy()
@@ -999,7 +1001,9 @@ class Application:
                 self.map_catalog.marker_count(),
             )
         else:
-            logger.info("Map catalog empty — run: uv run python update_db.py --maps-only")
+            logger.info(
+                "Map catalog empty — run: uv run python update_db.py --maps-only"
+            )
         logger.info("Press Ctrl+C in terminal to quit")
         logger.info("=" * 50)
 
@@ -1105,7 +1109,13 @@ def main() -> None:
     """Entry point for ARLO."""
 
     # Log any unhandled exception before exit
-    def exception_hook(exc_type, exc_value, exc_tb):
+    def exception_hook(
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if exc_type is None or exc_value is None:
+            return
         if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
             sys.__excepthook__(exc_type, exc_value, exc_tb)
             return
@@ -1124,9 +1134,10 @@ def main() -> None:
 
     sys.excepthook = exception_hook
 
-    def thread_exception_hook(args):
+    def thread_exception_hook(args: ExceptHookArgs) -> None:
+        thread_name = args.thread.name if args.thread is not None else "unknown"
         logger.error("=" * 50)
-        logger.error(f"THREAD EXCEPTION in {args.thread.name}")
+        logger.error(f"THREAD EXCEPTION in {thread_name}")
         logger.error("=" * 50)
         logger.error(
             "".join(
@@ -1137,7 +1148,7 @@ def main() -> None:
         )
         crash_log = APP_DIR / "crash.log"
         with Path(crash_log).open("a", encoding="utf-8") as f:
-            f.write(f"\n\nTHREAD {args.thread.name}:\n")
+            f.write(f"\n\nTHREAD {thread_name}:\n")
             f.write(
                 "".join(
                     traceback.format_exception(
@@ -1158,6 +1169,7 @@ def main() -> None:
         try:
             sys.path.insert(0, str(APP_DIR))
             from update_db import auto_update
+
             auto_update()
         except Exception as e:  # ruff: ignore[blind-except]
             logger.debug(f"Wiki auto-update unavailable: {e}")

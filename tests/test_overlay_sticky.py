@@ -39,8 +39,8 @@ def wayland_overlay(qapp):
 
 def test_wayland_show_does_not_arm_hide_timer(wayland_overlay):
     item = Item(name="Wires", action="SELL")
-    wayland_overlay.show("Wires", item)
-    assert not wayland_overlay._hide_timer.isActive()  # ruff: ignore[private-member-access]
+    wayland_overlay.show_item("Wires", item)
+    assert not wayland_overlay._hide_timer.isActive()
     assert wayland_overlay.is_visible()
 
 
@@ -50,29 +50,29 @@ def test_wayland_same_item_skips_remount(wayland_overlay):
         patch.object(QWidget, "show") as qshow,
         patch.object(wayland_overlay, "raise_") as raise_,
     ):
-        wayland_overlay.show("Wires", item)
-        wayland_overlay.show("WIRE5", item)
+        wayland_overlay.show_item("Wires", item)
+        wayland_overlay.show_item("WIRE5", item)
 
     assert qshow.call_count == 1
     assert raise_.call_count == 1
-    assert not wayland_overlay._hide_timer.isActive()  # ruff: ignore[private-member-access]
+    assert not wayland_overlay._hide_timer.isActive()
 
 
 def test_wayland_hide_from_scanner(wayland_overlay):
     item = Item(name="Wires", action="SELL")
-    wayland_overlay.show("Wires", item)
+    wayland_overlay.show_item("Wires", item)
     wayland_overlay.hide()
     assert not wayland_overlay.is_visible()
 
 
 def test_sell_price_only_when_in_raid(wayland_overlay):
     item = Item(name="Wires", action="SELL", sell_price=640, stack_size=20)
-    wayland_overlay.show("Wires", item, in_raid=False)
+    wayland_overlay.show_item("Wires", item, in_raid=False)
     assert "Sell:" not in wayland_overlay.info_label.text()
     assert "Stack: 20" in wayland_overlay.info_label.text()
 
     wayland_overlay.hide()
-    wayland_overlay.show("Metal Parts", item, in_raid=True)
+    wayland_overlay.show_item("Metal Parts", item, in_raid=True)
     text = wayland_overlay.info_label.text()
     assert "Sell: 640" in text
     assert "Stack: 20" in text

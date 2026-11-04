@@ -315,6 +315,26 @@ ARLO/
 
 ## Contributing
 
+### Lint, format, and types
+
+Formatting is **Ruff** (Black-compatible; the Prettier equivalent for this repo). Type checking is **basedpyright**. Install git hooks once, then they run on every commit:
+
+```
+uv sync --all-extras
+uv run pre-commit install   # format + lint + types on commit
+```
+
+Manually:
+
+```
+uv run ruff check .
+uv run ruff format .
+uv run basedpyright
+uv run pytest
+```
+
+CI on PRs and pushes to `main`/`dev` runs the same gate: Ruff lint, Ruff format check, basedpyright, and pytest.
+
 ### Item Database
 
 Run `uv run python update_db.py --dry-run` to preview the API data. If you spot incorrect auto-generated actions, edit `data/items.csv` directly and use `--merge` on future updates to preserve your fixes.
