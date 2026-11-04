@@ -151,7 +151,10 @@ class OverlayWindow(QWidget):
             return
         self._bump_hide_timer()
 
-    def show(self, item_name: str, recommendation: Item | None) -> None:
+    def show(
+        self, item_name: str, recommendation: Item | None, *, in_raid: bool = False
+    ) -> None:
+        """Show item info. Sell price is only shown when ``in_raid`` is True."""
         wayland = self._is_wayland()
         same = self._current_item == item_name
         if wayland and self._current_item and self._mapped:
@@ -179,7 +182,7 @@ class OverlayWindow(QWidget):
             self.action_label.setStyleSheet(f"color: {color};")
             self.accent_bar.setStyleSheet(f"background: {color};")
             info_parts: list[str] = []
-            if recommendation.sell_price is not None:
+            if in_raid and recommendation.sell_price is not None:
                 info_parts.append(f"Sell: {recommendation.sell_price:,}\u20a1")
             if recommendation.stack_size is not None:
                 info_parts.append(f"Stack: {recommendation.stack_size}")
