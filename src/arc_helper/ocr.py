@@ -24,6 +24,17 @@ from .screen import Point
 from .screen import ScreenCaptureUnavailable
 from .screen import get_backend
 
+_CREAM_ROW_FRAC = 0.5
+_CREAM_COL_FRAC = 0.3
+_COLOR_CHANNEL_DIFF = 30
+_COLOR_MAX_RGB_MIN = 80
+_COLOR_MAX_RGB_MAX = 240
+_COLOR_ROW_FRAC = 0.05
+_DARK_PIXEL_MAX = 100
+_MIN_NAME_LINE_LEN = 2
+_MIN_UPPER_RATIO = 0.6
+_MIN_ITEM_NAME_LEN = 3
+
 
 def grab_screen(bbox: tuple[int, int, int, int]) -> Image.Image:
     """Capture a screen region via the active screen backend."""
@@ -195,9 +206,7 @@ class OCREngine:
         def _binarize(value: float) -> int:
             return 255 if value > threshold else 0
 
-        gray = gray.point(_binarize, "1")
-
-        return gray
+        return gray.point(_binarize, "1")
 
     def preprocess_tooltip(self, image: Image.Image) -> Image.Image:
         """
@@ -218,8 +227,8 @@ class OCREngine:
         col_cream_percentage = np.sum(mask, axis=0) / mask.shape[0]
 
         # Find first/last row with significant cream
-        cream_rows = np.where(row_cream_percentage > 0.5)[0]
-        cream_cols = np.where(col_cream_percentage > 0.3)[0]
+        cream_rows = np.where(row_cream_percentage > _CREAM_ROW_FRAC)[0]
+        cream_cols = np.where(col_cream_percentage > _CREAM_COL_FRAC)[0]
 
         if len(cream_rows) == 0 or len(cream_cols) == 0:
             return Image.new("L", (image.width * 2, image.height * 2), 255)
@@ -236,7 +245,7 @@ class OCREngine:
         if n_rows == 0 or n_cols == 0:
             return Image.new("L", (image.width * 2, image.height * 2), 255)
         col_cream_pct = np.sum(cropped_mask, axis=0) / n_rows
-        tight_cols = np.where(col_cream_pct > 0.5)[0]
+        tight_cols = np.where(col_cream_pct > _CREAM_ROW_FRAC)[0]
 
         if len(tight_cols) == 0:
             return Image.new("L", (image.width * 2, image.height * 2), 255)
@@ -260,11 +269,15 @@ class OCREngine:
         color_diff = max_rgb - min_rgb
 
         # Colored pixels: significant difference between channels AND not too dark AND not too bright
-        is_colored = (color_diff > 30) & (max_rgb > 80) & (max_rgb < 240)
+        is_colored = (
+            (color_diff > _COLOR_CHANNEL_DIFF)
+            & (max_rgb > _COLOR_MAX_RGB_MIN)
+            & (max_rgb < _COLOR_MAX_RGB_MAX)
+        )
 
         # Count colored pixels per row - only exclude rows with SIGNIFICANT color (>5% of row)
         row_color_percentage = np.sum(is_colored, axis=1) / is_colored.shape[1]
-        row_has_significant_color = row_color_percentage > 0.05
+        row_has_significant_color = row_color_percentage > _COLOR_ROW_FRAC
 
         # Create output - white background
         result = (
@@ -273,7 +286,7 @@ class OCREngine:
         )
 
         # Only include dark text from rows WITHOUT significant colored pixels
-        is_dark = np.all(tight_cropped < 100, axis=2)
+        is_dark = np.all(tight_cropped < _DARK_PIXEL_MAX, axis=2)
 
         # Vectorized masking: rows without significant color AND dark pixels
         text_mask = (~row_has_significant_color[:, np.newaxis]) & is_dark
@@ -504,10 +517,13 @@ class OCREngine:
         started = False
         for raw_line in text.split("\n"):
             line = cls._clean_text(raw_line)
-            if len(line) >= 2 and cls._upper_ratio(line) >= 0.6:
+            if (
+                len(line) >= _MIN_NAME_LINE_LEN
+                and cls._upper_ratio(line) >= _MIN_UPPER_RATIO
+            ):
                 count += 1
                 started = True
-            elif started or len(line) >= 2:
+            elif started or len(line) >= _MIN_NAME_LINE_LEN:
                 break
         return count
 
@@ -530,7 +546,7 @@ class OCREngine:
         for line in lines:
             # Clean the line
             cleaned = self._clean_text(line)
-            if not cleaned or len(cleaned) < 2:
+            if not cleaned or len(cleaned) < _MIN_NAME_LINE_LEN:
                 continue
 
             # Check if line is ALL CAPS (item name style)
@@ -541,7 +557,7 @@ class OCREngine:
 
             is_all_caps = all(c.isupper() for c in alpha_chars)
 
-            if is_all_caps and len(cleaned) >= 3:
+            if is_all_caps and len(cleaned) >= _MIN_ITEM_NAME_LEN:
                 # This looks like an item name line
                 name_lines.append(cleaned)
                 found_name = True

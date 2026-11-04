@@ -31,6 +31,10 @@ STATIC_BASE = "https://static.metaforge.app/arc-raiders"
 CDN_BASE = "https://cdn.metaforge.app/arc-raiders"
 USER_AGENT = "ARLO/1.0 (Arc Raiders Loot Overlay - https://github.com/Soygen/ARLO)"
 
+_HTTP_OK = 200
+_MIN_PAIR = 2
+_MIN_POOL_REF_LIST_LEN = 5
+
 # Overview thumbnails on static host use PascalCase + "Tile" (from the map picker).
 _STATIC_UI_TILES: dict[MapId, str] = {
     MapId.BLUE_GATE: "BlueGateTile.webp",
@@ -395,7 +399,7 @@ def infer_reference_bounds_from_tiles(
     ys: list[int] = []
     for p in tile_dir.glob("*.webp"):
         parts = p.stem.split("_")
-        if len(parts) != 2:
+        if len(parts) != _MIN_PAIR:
             continue
         try:
             xs.append(int(parts[0]))
@@ -552,7 +556,7 @@ def _normalize_marker(raw: dict, map_id: str) -> dict | None:
 def _download(sess: requests.Session, url: str, dest: Path) -> bool:
     try:
         resp = sess.get(url, timeout=60)
-        if resp.status_code != 200 or not resp.content:
+        if resp.status_code != _HTTP_OK or not resp.content:
             return False
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(resp.content)
@@ -578,7 +582,7 @@ def _tile_exists(
         )
     except requests.RequestException:
         return False
-    return r.status_code == 200
+    return r.status_code == _HTTP_OK
 
 
 def _detect_tile_name_fmt(
@@ -910,7 +914,7 @@ def lookup_item_by_search(
     else the first result when the query uniquely prefixes one name.
     """
     q = (query or "").strip()
-    if len(q) < 2:
+    if len(q) < _MIN_PAIR:
         return None
     sess = session or _session()
     resp = sess.get(
@@ -973,7 +977,8 @@ def _decode_sveltekit_pool(pool: list) -> object:
                 isinstance(x, (int, float)) and not isinstance(x, bool) for x in v
             ):
                 if any(isinstance(x, float) for x in v) or (
-                    len(v) >= 5 and max(int(x) for x in v) >= len(pool)
+                    len(v) >= _MIN_POOL_REF_LIST_LEN
+                    and max(int(x) for x in v) >= len(pool)
                 ):
                     memo[i] = list(v)
                 elif all(isinstance(x, int) and 0 <= x < len(pool) for x in v):
@@ -1043,7 +1048,7 @@ def fetch_item_loose_spots(
     resp.raise_for_status()
     payload = resp.json()
     nodes = payload.get("nodes") or []
-    if len(nodes) < 2:
+    if len(nodes) < _MIN_PAIR:
         return []
     pool = nodes[1].get("data")
     if not isinstance(pool, list) or not pool:
@@ -1062,7 +1067,7 @@ def fetch_item_loose_spots(
     if not isinstance(raw_spots, list):
         return out
     for row in raw_spots:
-        if not isinstance(row, (list, tuple)) or len(row) < 2:
+        if not isinstance(row, (list, tuple)) or len(row) < _MIN_PAIR:
             continue
         try:
             lat = float(row[0])

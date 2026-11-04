@@ -39,8 +39,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         text,
     )
     text = re.sub(r"\bCrafting(?!:)\s+", "Crafting: ", text)
-    text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
-    return text
+    return re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
 
 
 def format_detail_parts(

@@ -223,7 +223,8 @@ class WaylandBackend:
             parts.append(f"{err.message} ({debug})")
         return f"\nGStreamer errors: {'; '.join(parts)}" if parts else ""
 
-    def _x11_logical_width(self) -> int:
+    @staticmethod
+    def _x11_logical_width() -> int:
         try:
             from Xlib import display as xlib_display
 

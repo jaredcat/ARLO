@@ -49,6 +49,8 @@ from arc_helper.ui.platform import apply_overlay_flags
 if TYPE_CHECKING:
     from PIL import Image
 
+_PREVIEW_MAX_WIDTH = 350
+
 
 class _RegionPreview(QWidget):
     def __init__(self, color: str) -> None:
@@ -282,8 +284,10 @@ class CalibrationTool(QWidget):
             QImage.Format.Format_RGB888,
         ).copy()
         pix = QPixmap.fromImage(qimg)
-        if pix.width() > 350:
-            pix = pix.scaledToWidth(350, Qt.TransformationMode.SmoothTransformation)
+        if pix.width() > _PREVIEW_MAX_WIDTH:
+            pix = pix.scaledToWidth(
+                _PREVIEW_MAX_WIDTH, Qt.TransformationMode.SmoothTransformation
+            )
         self.preview_image.setPixmap(pix)
 
     def _test_trigger(self, editor: RegionEditor, name: str) -> None:

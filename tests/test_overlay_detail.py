@@ -48,7 +48,7 @@ def test_keep_only():
         keep_for="Quests: Unexpected Initiative (1x)",
     )
     assert keep == "Quests: Unexpected Initiative (1x)"
-    assert recycle == ""
+    assert not recycle
 
 
 def test_recycle_only():
@@ -56,13 +56,13 @@ def test_recycle_only():
         recycle_for="2x Metal Parts",
         keep_for="",
     )
-    assert keep == ""
+    assert not keep
     assert recycle == f"{RECYCLE_SYMBOL} 2x Metal Parts"
 
 
 def test_empty_both():
     assert format_detail_parts(recycle_for=None, keep_for=None) == ("", "")
-    assert format_detail_text(recycle_for=None, keep_for=None) == ""
+    assert not format_detail_text(recycle_for=None, keep_for=None)
 
 
 def test_whitespace_ignored():

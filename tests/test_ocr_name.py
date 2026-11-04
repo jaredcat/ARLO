@@ -1,5 +1,6 @@
 """Tests for item-name line detection used by the two-pass OCR reader."""
 
+import math
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -33,9 +34,9 @@ def test_preprocess_tooltip_narrow_cream_region():
 
 
 def test_upper_ratio():
-    assert OCREngine._upper_ratio("RASCAL") == 1.0
+    assert math.isclose(OCREngine._upper_ratio("RASCAL"), 1.0)
     assert OCREngine._upper_ratio("Fires explosive") < 0.3
-    assert OCREngine._upper_ratio("") == 0.0
+    assert math.isclose(OCREngine._upper_ratio(""), 0.0)
 
 
 def test_single_line_name():

@@ -30,6 +30,20 @@ def _match_key(name: str) -> str:
 # OCR often swaps these digits/letters (5TH→STH, Mk.1→MKL, …)
 _OCR_FOLD = str.maketrans({"0": "o", "1": "i", "l": "i", "5": "s", "8": "b"})
 
+# OCR name-matching length / similarity thresholds
+_NAME_KEY_LEN = 6
+_SHORT_NAME_RATIO = 0.8
+_MIN_STEM_LEN = 5
+_MAX_PREFIX_EXTRA = 12
+_MAX_SUFFIX_EXTRA = 18
+_MAX_CONTAINED_PREFIX = 8
+_MAX_CONTAINED_SUFFIX = 4
+_MIN_CATALOG_STEM_LEN = 8
+_MAX_UI_PREFIX = 10
+_MAX_UI_SUFFIX = 2
+_LONG_KEY_MIN_LEN = 10
+_MIN_TOKEN_PAIR = 2
+
 
 def _ocr_fold_key(name: str) -> str:
     """``_match_key`` with common digit/letter confusions collapsed."""
@@ -61,8 +75,8 @@ def names_match(a: str, b: str, *, cutoff: float = 0.85) -> bool:
         difflib.SequenceMatcher(None, _ocr_fold_key(a), _ocr_fold_key(b)).ratio(),
     )
     # Short names: allow a single substitution (WIRES↔WIRE5 ≈ 0.8)
-    if max(len(ka), len(kb)) <= 6:
-        return ratio >= 0.8
+    if max(len(ka), len(kb)) <= _NAME_KEY_LEN:
+        return ratio >= _SHORT_NAME_RATIO
     return ratio >= cutoff
 
 
@@ -119,9 +133,9 @@ def _pick_row_by_single_ocr_key(
             folded_hits.append(row)
             continue
         if (
-            len(target) >= 5
+            len(target) >= _MIN_STEM_LEN
             and ck.startswith(target)
-            and 0 < len(ck) - len(target) <= 12
+            and 0 < len(ck) - len(target) <= _MAX_PREFIX_EXTRA
         ):
             # Query is a stem of the catalog name (tier/variant OCR-dropped).
             # Require length ≥5 so scrubbed fragments like ``ADVA`` do not
@@ -130,13 +144,21 @@ def _pick_row_by_single_ocr_key(
         # OCR dropped a leading chunk (``CHERIII`` → ``Stitcher III``,
         # ``TIONBOX`` → ``Frequency Modulation Box``). Cap is generous because
         # uniqueness is required before we accept a suffix hit.
-        if len(target) >= 5 and ck.endswith(target) and 0 < len(ck) - len(target) <= 18:
+        if (
+            len(target) >= _MIN_STEM_LEN
+            and ck.endswith(target)
+            and 0 < len(ck) - len(target) <= _MAX_SUFFIX_EXTRA
+        ):
             suffix_hits.append(row)
         # Query sits inside the catalog key with a short OCR prefix/suffix gap
         # (``TINGMKSURVIVOR`` → ``Looting Mk. 3 (Survivor)``).
-        if len(target) >= 6 and target != ck:
+        if len(target) >= _NAME_KEY_LEN and target != ck:
             idx = ck.find(target)
-            if idx >= 0 and idx <= 8 and len(ck) - idx - len(target) <= 4:
+            if (
+                idx >= 0
+                and idx <= _MAX_CONTAINED_PREFIX
+                and len(ck) - idx - len(target) <= _MAX_CONTAINED_SUFFIX
+            ):
                 contained_hits.append(row)
             else:
                 # Catalog key contained in a UI-prefixed query
@@ -145,11 +167,11 @@ def _pick_row_by_single_ocr_key(
                 # inside ``JSTRIALMAGNET``.
                 qidx = target.find(ck)
                 if (
-                    len(ck) >= 8
+                    len(ck) >= _MIN_CATALOG_STEM_LEN
                     and len(ck) * 2 >= len(target)
                     and qidx >= 0
-                    and qidx <= 10
-                    and len(target) - qidx - len(ck) <= 2
+                    and qidx <= _MAX_UI_PREFIX
+                    and len(target) - qidx - len(ck) <= _MAX_UI_SUFFIX
                 ):
                     contained_hits.append(row)
 
@@ -181,7 +203,7 @@ def _pick_row_by_single_ocr_key(
     # Long keys: allow slightly more OCR damage (Industrial←Jstrial, …)
     if best is not None:
         best_len = len(_match_key(best["name"]))
-        cutoff = 0.82 if min(len(target), best_len) >= 10 else 0.9
+        cutoff = 0.82 if min(len(target), best_len) >= _LONG_KEY_MIN_LEN else 0.9
         if best_ratio >= cutoff:
             return best
 
@@ -224,11 +246,11 @@ def _pick_row_by_ocr_key(
     # space (truncated title + tooltip). Try each token; prefer the last unique
     # hit so the hovered tooltip wins over dialog-title chrome.
     tokens = scrubbed.split()
-    if len(tokens) < 2:
+    if len(tokens) < _MIN_TOKEN_PAIR:
         return None
     last_hit: sqlite3.Row | None = None
     for tok in tokens:
-        if len(_match_key(tok)) < 6:
+        if len(_match_key(tok)) < _NAME_KEY_LEN:
             continue
         tok_hit = _pick_row_by_single_ocr_key(tok, rows)
         if tok_hit is not None:
@@ -421,7 +443,8 @@ class Database:
 
         return count
 
-    def log_missing_item(self, name: str) -> None:
+    @staticmethod
+    def log_missing_item(name: str) -> None:
         """Log an unknown item to missing_items.csv for easy addition later.
 
         Writes under ``data/`` (not beside the DB) and de-duplicates so OCR

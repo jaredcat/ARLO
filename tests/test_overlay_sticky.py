@@ -13,8 +13,7 @@ from arc_helper.ui.overlay import OverlayWindow
 
 @pytest.fixture(scope="module")
 def qapp():
-    app = QApplication.instance() or QApplication([])
-    return app
+    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture

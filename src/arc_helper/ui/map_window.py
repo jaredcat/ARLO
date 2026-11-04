@@ -64,6 +64,7 @@ DRAW_PIN_CAP = 400
 DISPLAY_MAX_EDGE = 1536
 SEARCH_DEBOUNCE_MS = 120
 FILTER_NOTIFY_DEBOUNCE_MS = 250
+_MIN_SEARCH_LEN = 3
 
 
 def _pil_to_qpixmap(im: Image.Image) -> QPixmap:
@@ -499,7 +500,7 @@ class MapWindow(QWidget):
         self.refresh_markers()
 
     def _on_search_key(self, text: str) -> None:
-        if len(text.strip()) < 3:
+        if len(text.strip()) < _MIN_SEARCH_LEN:
             return
         self._item_filter = None
         self._search_timer.start(SEARCH_DEBOUNCE_MS)

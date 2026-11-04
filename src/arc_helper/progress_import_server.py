@@ -34,6 +34,10 @@ MAX_BODY_BYTES = 20 * 1024 * 1024
 CORS_ORIGIN = "https://metaforge.app"
 ACCOUNT_SYNC_URL = "https://metaforge.app/api/arc-raiders/account-sync"
 
+_JUST_NOW_SEC = 10
+_TIME_UNIT = 60
+_MAX_HOURS_AS_HOURS = 48
+
 OnImport = Callable[[ProgressProfile], None]
 
 
@@ -216,15 +220,15 @@ def format_import_age(mtime: float | None, *, now: float | None = None) -> str:
 
     ref = time.time() if now is None else now
     seconds = max(0, int(ref - mtime))
-    if seconds < 10:
+    if seconds < _JUST_NOW_SEC:
         return "just now"
-    if seconds < 60:
+    if seconds < _TIME_UNIT:
         return f"{seconds}s ago"
-    minutes = seconds // 60
-    if minutes < 60:
+    minutes = seconds // _TIME_UNIT
+    if minutes < _TIME_UNIT:
         return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 48:
+    hours = minutes // _TIME_UNIT
+    if hours < _MAX_HOURS_AS_HOURS:
         return f"{hours}h ago"
     days = hours // 24
     return f"{days}d ago"
@@ -300,7 +304,11 @@ class _ImportHandler(BaseHTTPRequestHandler):
     server_version = "ARLOProgressImport/1.0"
 
     def log_message(self, format: str, *args: Any) -> None:
-        logger.debug("progress-import: " + format, *args)
+        logger.debug(
+            "progress-import [%s]: " + format,
+            self.address_string(),
+            *args,
+        )
 
     def _send_bytes(
         self,

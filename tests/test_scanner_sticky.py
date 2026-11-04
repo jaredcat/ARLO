@@ -77,7 +77,7 @@ def test_wayland_idle_hides_overlay():
     assert ("overlay_hide",) in msgs
     assert ("status", "scanning") in msgs
     assert scanner.state == ScannerState.IDLE
-    assert scanner._last_shown_item == ""
+    assert not scanner._last_shown_item
 
 
 def test_x11_idle_does_not_force_hide():
@@ -136,7 +136,7 @@ def test_wayland_empty_ocr_hides_after_display_time():
         scanner._handle_empty_tooltip()
 
     assert _drain(scanner.ui_queue) == [("overlay_hide",)]
-    assert scanner._last_shown_item == ""
+    assert not scanner._last_shown_item
 
 
 def test_x11_empty_ocr_does_not_hide():

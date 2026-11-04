@@ -33,6 +33,21 @@ _TEAL_H_HIGH = 100
 _TEAL_S_LOW = 80
 _TEAL_V_LOW = 80
 
+_MIN_MARKER_AREA = 20
+_MAX_MARKER_ASPECT = 4.0
+_EPS = 1e-6
+_MAX_ROTATION_DEG = 180.0
+_MIN_ORB_MATCHES = 8
+_MIN_KNN_PAIR = 2
+_MIN_INLIER_RATIO = 0.15
+_VIEWPORT_MARGIN_PX = 20
+_NORM_LOOSE_MIN = -0.2
+_NORM_LOOSE_MAX = 1.2
+_THUMB_DIFF_PIXEL = 18
+_THUMB_CHANGED_FRAC = 0.12
+_NORM_TIGHT_MIN = -0.05
+_NORM_TIGHT_MAX = 1.05
+
 # OCR / in-game title text → MapId (aliases folded onto MapId consts).
 _MAP_TITLE_TO_ID: dict[str, MapId] = {
     "the blue gate": MapId.BLUE_GATE,
@@ -87,10 +102,9 @@ def player_arrow_template() -> Path:
     if bundled.is_file():
         return bundled
     # Dev tree: repo static/
-    alt = (
+    return (
         Path(__file__).resolve().parents[2] / "static" / "map_sync" / "player_arrow.png"
     )
-    return alt
 
 
 def find_teal_player(
@@ -130,15 +144,15 @@ def find_teal_player(
     best_score = 0.0
     for cnt in contours:
         area = float(cv2.contourArea(cnt))
-        if area < 20 or area > img_area * 0.05:
+        if area < _MIN_MARKER_AREA or area > img_area * 0.05:
             continue
         _x, _y, bw, bh = cv2.boundingRect(cnt)
         # Prefer compact-ish shapes
         aspect = max(bw, bh) / max(min(bw, bh), 1)
-        if aspect > 4.0:
+        if aspect > _MAX_MARKER_ASPECT:
             continue
         moments = cv2.moments(cnt)
-        if moments["m00"] <= 1e-6:
+        if moments["m00"] <= _EPS:
             continue
         cx = float(moments["m10"] / moments["m00"])
         cy = float(moments["m01"] / moments["m00"])
@@ -176,13 +190,13 @@ def affine_orientation_ok(
     if det <= 0:
         return False
     scale = math.hypot(a, c)
-    if scale < 1e-6:
+    if scale < _EPS:
         return False
     # θ from [[s cos, -s sin], [s sin, s cos]]
     angle_deg = math.degrees(math.atan2(c, a))
-    while angle_deg > 180.0:
+    while angle_deg > _MAX_ROTATION_DEG:
         angle_deg -= 360.0
-    while angle_deg < -180.0:
+    while angle_deg < -_MAX_ROTATION_DEG:
         angle_deg += 360.0
     return abs(angle_deg) <= max_rotation_deg
 
@@ -222,19 +236,24 @@ def register_viewport_to_reference(
     detector = orb_create(4000)
     kp1, des1 = detector.detectAndCompute(vp, None)
     kp2, des2 = detector.detectAndCompute(ref, None)
-    if des1 is None or des2 is None or len(kp1) < 8 or len(kp2) < 8:
+    if (
+        des1 is None
+        or des2 is None
+        or len(kp1) < _MIN_ORB_MATCHES
+        or len(kp2) < _MIN_ORB_MATCHES
+    ):
         return None
 
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     knn = matcher.knnMatch(des1, des2, k=2)
     good = []
     for pair in knn:
-        if len(pair) < 2:
+        if len(pair) < _MIN_KNN_PAIR:
             continue
         m, n = pair
         if m.distance < 0.75 * n.distance:
             good.append(m)
-    if len(good) < 8:
+    if len(good) < _MIN_ORB_MATCHES:
         return None
 
     src = np.array([kp1[m.queryIdx].pt for m in good], dtype=np.float32).reshape(
@@ -250,11 +269,11 @@ def register_viewport_to_reference(
     if affine is None or inliers is None:  # pyright: ignore[reportUnnecessaryComparison]
         return None
     ratio = float(inliers.sum()) / float(len(inliers))
-    if ratio < 0.15:
+    if ratio < _MIN_INLIER_RATIO:
         return None
 
     # Undo reference downscale in the transform
-    if scale_ref != 1.0:
+    if not math.isclose(scale_ref, 1.0):
         s = 1.0 / scale_ref
         # maps vp → scaled_ref; we want vp → full_ref
         affine = affine.astype(np.float64)
@@ -312,7 +331,12 @@ def latlng_to_screen(
     vw = right - left
     vh = bottom - top
     # Outside the visible terrain crop → skip
-    if vx < -20 or vy < -20 or vx > vw + 20 or vy > vh + 20:
+    if (
+        vx < -_VIEWPORT_MARGIN_PX
+        or vy < -_VIEWPORT_MARGIN_PX
+        or vx > vw + _VIEWPORT_MARGIN_PX
+        or vy > vh + _VIEWPORT_MARGIN_PX
+    ):
         return None
     return left + vx, top + vy
 
@@ -331,7 +355,12 @@ def viewport_center_latlng(
         return None
     nx = rx / reg.ref_width
     ny = ry / reg.ref_height
-    if nx < -0.2 or nx > 1.2 or ny < -0.2 or ny > 1.2:
+    if (
+        nx < _NORM_LOOSE_MIN
+        or nx > _NORM_LOOSE_MAX
+        or ny < _NORM_LOOSE_MIN
+        or ny > _NORM_LOOSE_MAX
+    ):
         return None
     nx = min(1.0, max(0.0, nx))
     ny = min(1.0, max(0.0, ny))
@@ -419,8 +448,8 @@ def thumbs_differ(
     delta = float(np.mean(diff))
     if delta < threshold:
         return False
-    changed = float(np.mean(diff > 18))
-    return changed >= 0.12
+    changed = float(np.mean(diff > _THUMB_DIFF_PIXEL))
+    return changed >= _THUMB_CHANGED_FRAC
 
 
 def crop_map_viewport(full: Image.Image) -> Image.Image:
@@ -611,7 +640,10 @@ class MapSyncEngine:
                 if rw > 0 and rh > 0:
                     nx = rx / rw
                     ny = ry / rh
-                    if -0.05 <= nx <= 1.05 and -0.05 <= ny <= 1.05:
+                    if (
+                        _NORM_TIGHT_MIN <= nx <= _NORM_TIGHT_MAX
+                        and _NORM_TIGHT_MIN <= ny <= _NORM_TIGHT_MAX
+                    ):
                         nx = min(1.0, max(0.0, nx))
                         ny = min(1.0, max(0.0, ny))
                         lat, lng = norm_to_latlng(nx, ny, meta)

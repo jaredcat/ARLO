@@ -78,7 +78,8 @@ class ResolutionProfileManager:
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f"Warning: Failed to load resolution profiles: {e}")
 
-    def get_resolution_key(self) -> str:
+    @staticmethod
+    def get_resolution_key() -> str:
         """Get the current screen resolution as a string key."""
         width, height = get_screen_resolution()
         return f"{width}x{height}"

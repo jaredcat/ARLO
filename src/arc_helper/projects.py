@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC
 from datetime import date
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from .config import APP_DIR
@@ -74,7 +76,8 @@ class ProjectCatalog:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _has_schedule_columns(self, conn: sqlite3.Connection) -> bool:
+    @staticmethod
+    def _has_schedule_columns(conn: sqlite3.Connection) -> bool:
         cols = {
             row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()
         }
@@ -113,7 +116,7 @@ class ProjectCatalog:
 
         Unknown labels (e.g. wiki-only ``Expedition 5``) fail open as active.
         """
-        today = today or date.today()
+        today = today or datetime.now(UTC).date()
         self._load_schedule()
         assert self._schedule_cache is not None
         assert self._name_to_id is not None

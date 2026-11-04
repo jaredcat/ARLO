@@ -60,6 +60,7 @@ class ProgressProfile(BaseModel):
 # ---------------------------------------------------------------------------
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+_MIN_PROJECT_KEY_PARTS = 2
 
 
 def slugify(value: str) -> str:
@@ -167,7 +168,7 @@ def import_account_sync(raw: dict[str, Any] | str | Path) -> ProgressProfile:
         if not isinstance(entry, dict):
             continue
         parts = str(key).split("::")
-        if len(parts) < 2:
+        if len(parts) < _MIN_PROJECT_KEY_PARTS:
             continue
         project_name = _norm_name(parts[0])
         item_slug = slugify(parts[-1])

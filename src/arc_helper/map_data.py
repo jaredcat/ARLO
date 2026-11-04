@@ -89,6 +89,9 @@ CATEGORY_COLORS: dict[str, str] = {
 # ~40 keeps shelf aisles distinct without matching Metaforge's per-surface dots.
 LOOSE_CLUSTER_RADIUS = 40.0
 
+_MIN_ARC_TOKEN_LEN = 3
+_MIN_CONTAINS_QUERY_LEN = 4
+
 # Metaforge stores ARC enemies under internal subcategory ids (e.g. bison);
 # display names come from /api/arc-raiders/arcs.
 ARC_SUBCATEGORY_NAMES: dict[str, str] = {
@@ -267,10 +270,12 @@ def arc_subcategories_for_item(item_name: str) -> list[str]:
         d = display.lower()
         bare = d.removeprefix("arc ").strip()
         tokens = [d, bare, sub_id.replace("-", " "), sub_id]
-        if any(t and len(t) >= 3 and t in key for t in tokens):
-            if sub_id not in seen:
-                seen.add(sub_id)
-                hits.append(sub_id)
+        if (
+            any(t and len(t) >= _MIN_ARC_TOKEN_LEN and t in key for t in tokens)
+            and sub_id not in seen
+        ):
+            seen.add(sub_id)
+            hits.append(sub_id)
     if "leaper" in key and "bison" not in seen:
         hits.append("bison")
         seen.add("bison")
@@ -625,7 +630,7 @@ class MapCatalog:
             if len(prefix) == 1 and (prefix[0]["item_id"] or "").strip():
                 return prefix[0]["item_id"].strip(), prefix[0]["name"]
 
-            if len(q) >= 4:
+            if len(q) >= _MIN_CONTAINS_QUERY_LEN:
                 contains = conn.execute(
                     """
                     SELECT name, item_id FROM item_loot_areas

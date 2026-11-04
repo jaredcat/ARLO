@@ -1,6 +1,6 @@
 [project]
 name = "arlo"
-version = "0.4.0"
+version = "1.0.0"
 description = "Item recommendation overlay for Arc Raiders"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -144,41 +144,33 @@ select = [
   "TRY",  # tryceratops (TRY)
 ]
 ignore = [
-  # "B008",    # read the default from a module-level singleton variable
-  "A002",    # Builtin argument shadowing (BaseHTTPRequestHandler.log_message uses `format`)
-  "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
-
-  "C901",    # `get_skeleton` is too complex (14 > 10)
-  "COM812",  # Trailing comma missing, warning: The following rule may cause conflicts when used with the formatter
-  "E501",    # ignore line-length
-  "PD015",   # Use `.merge` method instead of `pd.merge` function. They have equivalent functionality.
-  "PLC0415", # `import` should be at the top-level of a file
-  "PLR0911", # Too many return statements (8 > 6)
-  "PLR0912", # Too many branches (13 > 12)
-  "PLR0913", # Too many arguments in function definition (8 > 5)
-  "PLR0914", # Too many local variables (20/15)
-  "PLR0915", # Too many statements (81 > 50)
-  "PLR0917", # Too many positional arguments (8/5)
-  "PLR2004", # Magic value used in comparison, consider replacing `150` with a constant variable
-  "PLR0904", # Too many public methods (34 > 20),
-  "PLW0717", # Too many statements in `try` clause (new in recent Ruff preview)
-  "RUF001",  # Ambiguous unicode in strings (UI uses symbols intentionally)
-  "RUF002",  # Ambiguous unicode in docstrings
-  "RUF003",  # Ambiguous unicode in comments
-  "RUF069",  # Float equality comparison (new in recent Ruff preview)
-  "RUF201",  # Prefer rule names in selectors — keep stable code-based config
-  "RET504",
-  # Pre-existing style nags; not bug finders for this pass
-  "PLW2901",  # redefined loop name
-  "PLC1901",  # compare to empty string
-  "E701",     # multiple statements on one line
-  "SIM102",   # collapsible if
-  "PLR6301",  # no-self-use
-  "TRY300",   # try consider else
-  "G004",     # logging f-string
-  "DTZ011",   # date.today()
-  "DTZ007",   # strptime without zone
+  # Intentional / formatter conflicts (keep)
+  "A002",    # BaseHTTPRequestHandler.log_message uses `format`
+  "ANN401",  # Allow typing.Any at intentional boundary sites
+  "COM812",  # Trailing-comma rule conflicts with the formatter
+  "E501",    # Line length enforced by the formatter, not the linter
+  "PLC0415", # Lazy / platform-gated imports are intentional
+  "PLR0904", # Large facade classes (Qt windows, DB) — refactor separately
+  "PLW0717", # Large try bodies in I/O / portal setup — refactor with complexity
+  "RUF001",  # UI strings intentionally use symbols
+  "RUF002",
+  "RUF003",
+  "RUF201",  # Keep stable code-based selectors in this file
 ]
+
+# Complexity as regression guards (raised above current worst offenders;
+# ratchet down over time as large functions are split).
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.lint.pylint]
+max-args = 9
+max-positional-args = 8
+max-branches = 25
+max-returns = 10
+max-statements = 110
+max-locals = 40
+max-public-methods = 40
 
 [tool.ruff.lint.isort]
 force-single-line = true
@@ -193,6 +185,7 @@ force-single-line = true
   "PT018",
   "ARG",
   "PLR6301",
+  "PLR2004",  # Magic numbers in assertions are fine
 ]
 "scripts/**/*.py" = ["ANN", "INP001", "T20", "S", "SLF001", "N802", "PLW1514", "RUF105"]
 "build.py" = ["ANN", "G004"]

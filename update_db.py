@@ -43,6 +43,7 @@ import sys
 import time
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import UTC
 from datetime import date
 from datetime import datetime
 from pathlib import Path
@@ -99,6 +100,11 @@ USER_AGENT = (
 
 QUICK_USE_CATEGORIES = {"Quick Use", "Shield", "Augment", "Mods", "Ammunition", "Key"}
 MATERIAL_CATEGORIES = {"Basic Material", "Refined Material", "Topside Material"}
+
+_MIN_WIDE_TABLE_CELLS = 5
+_REQUIREMENT_TRIPLE_LEN = 3
+_MIN_PAIR = 2
+_MIN_LOOT_ROW_CELLS = 4
 
 
 # =============================================================================
@@ -843,12 +849,12 @@ def apply_workshop_keep_map(
                 r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
                 loot,
             ):
-                chunk = chunk.strip().strip(";").strip()
-                if not chunk:
+                chunk_stripped = chunk.strip().strip(";").strip()
+                if not chunk_stripped:
                     continue
-                if re.match(r"^Workshop:", chunk, re.IGNORECASE):
+                if re.match(r"^Workshop:", chunk_stripped, re.IGNORECASE):
                     continue
-                parts.append(chunk)
+                parts.append(chunk_stripped)
         ws = workshop_map.get(key)
         if ws:
             parts.insert(0, "Workshop: " + " ".join(ws))
@@ -880,7 +886,7 @@ def scrape_research_blueprint_keep_map() -> dict[str, list[str]]:
     rows_n = 0
     for tr in table.find_all("tr")[1:]:
         cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
-        if len(cells) < 5:
+        if len(cells) < _MIN_WIDE_TABLE_CELLS:
             continue
         ingredients = _parse_wiki_item_quantities(cells[0])
         results = _parse_wiki_item_quantities(cells[4])
@@ -922,10 +928,12 @@ def apply_research_keep_map(
                 r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
                 existing,
             ):
-                chunk = chunk.strip().strip(";").strip()
-                if not chunk or re.match(r"^Research:", chunk, re.IGNORECASE):
+                chunk_stripped = chunk.strip().strip(";").strip()
+                if not chunk_stripped or re.match(
+                    r"^Research:", chunk_stripped, re.IGNORECASE
+                ):
                     continue
-                parts.append(chunk)
+                parts.append(chunk_stripped)
         parts.append(research_line)
         out[key] = "; ".join(parts)
     return out
@@ -963,10 +971,13 @@ def _normalize_amp_node_key(name: str) -> str:
     """Collapse ``X Rounds`` / ``X-Rounds`` / plural grenade labels."""
     text = re.sub(r"[\s\-]+", " ", (name or "").strip().lower())
     text = re.sub(r"\s+", " ", text)
-    if text.endswith("s") and text not in {"x rounds", "incendiary rounds"}:
+    if (
+        text.endswith("s")
+        and text not in {"x rounds", "incendiary rounds"}
+        and text.endswith(" grenades")
+    ):
         # Incendiary Grenades → incendiary grenade
-        if text.endswith(" grenades"):
-            text = text[:-1]
+        text = text[:-1]
     return text
 
 
@@ -1012,7 +1023,7 @@ def scrape_amplification_node_weapons() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for tr in table.find_all("tr")[1:]:
         cells = [c.get_text(" ", strip=True) for c in tr.find_all("td")]
-        if len(cells) < 5:
+        if len(cells) < _MIN_WIDE_TABLE_CELLS:
             continue
         node = cells[1].strip()
         weapons = _weapons_from_amp_stats(cells[4])
@@ -1100,10 +1111,12 @@ def apply_amplify_keep_map(
                 r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
                 existing,
             ):
-                chunk = chunk.strip().strip(";").strip()
-                if not chunk or re.match(r"^Amplify:", chunk, re.IGNORECASE):
+                chunk_stripped = chunk.strip().strip(";").strip()
+                if not chunk_stripped or re.match(
+                    r"^Amplify:", chunk_stripped, re.IGNORECASE
+                ):
                     continue
-                parts.append(chunk)
+                parts.append(chunk_stripped)
         parts.append(amplify_line)
         out[key] = "; ".join(parts)
     return out
@@ -1189,15 +1202,15 @@ def apply_crafting_keep_map(
                 r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
                 existing,
             ):
-                chunk = chunk.strip().strip(";").strip()
-                if not chunk:
+                chunk_stripped = chunk.strip().strip(";").strip()
+                if not chunk_stripped:
                     continue
-                if re.match(r"^Crafting:", chunk, re.IGNORECASE):
+                if re.match(r"^Crafting:", chunk_stripped, re.IGNORECASE):
                     continue
-                if re.match(r"^Amplify:", chunk, re.IGNORECASE):
-                    amplify_parts.append(chunk)
+                if re.match(r"^Amplify:", chunk_stripped, re.IGNORECASE):
+                    amplify_parts.append(chunk_stripped)
                     continue
-                parts.append(chunk)
+                parts.append(chunk_stripped)
         parts.append(crafting_line)
         parts.extend(amplify_parts)
         out[key] = "; ".join(parts)
@@ -1241,9 +1254,9 @@ def _parse_wiki_item_quantities(text: str) -> list[tuple[str, int]]:
         return []
     found: list[tuple[str, int]] = []
     for qty_s, name in _WIKI_ITEM_QTY_RE.findall(raw):
-        name = re.sub(r"\s+", " ", name).strip(" ,;")
-        if name:
-            found.append((name, int(qty_s)))
+        name_cleaned = re.sub(r"\s+", " ", name).strip(" ,;")
+        if name_cleaned:
+            found.append((name_cleaned, int(qty_s)))
     return found
 
 
@@ -1463,9 +1476,8 @@ def _scope_content(soup: BeautifulSoup, project_name: str, href: str) -> Any:
     parts: list[str] = [str(heading)]
     for sib in heading.next_siblings:
         sib_name = getattr(sib, "name", None)
-        if sib_name in {"h2", "h3", "h4"}:
-            if int(str(sib_name)[1]) <= level:
-                break
+        if sib_name in {"h2", "h3", "h4"} and int(str(sib_name)[1]) <= level:
+            break
         if sib_name:
             parts.append(str(sib))
     return BeautifulSoup("".join(parts), "html.parser")
@@ -1555,10 +1567,11 @@ def _tabber_panel_turn_in_pairs(panel: Any) -> list[tuple[str, int]]:
             continue
         if first_ul is not None:
             text = child.get_text(" ", strip=True).lower()
-            if child.name in {"h2", "h3", "h4"} or "reward" in text[:20]:
-                if "reward" in text:
-                    has_rewards_after = True
-                    break
+            if (
+                child.name in {"h2", "h3", "h4"} or "reward" in text[:20]
+            ) and "reward" in text:
+                has_rewards_after = True
+                break
             if "mw-heading" in (child.get("class") or []) and "reward" in text:
                 has_rewards_after = True
                 break
@@ -1590,7 +1603,7 @@ def _aggregate_requirements(
     totals: dict[tuple[str, int | None], int] = {}
     order: list[tuple[str, int | None]] = []
     for pair in pairs:
-        if len(pair) == 3:
+        if len(pair) == _REQUIREMENT_TRIPLE_LEN:
             name, qty, stage = pair
         else:
             name, qty = pair  # type: ignore[misc]
@@ -1620,7 +1633,7 @@ def parse_wiki_date(value: str) -> date | None:
         return None
     for fmt in _WIKI_DATE_FORMATS:
         try:
-            return datetime.strptime(text, fmt).date()
+            return datetime.strptime(text, fmt).replace(tzinfo=UTC).date()
         except ValueError:
             continue
     return None
@@ -1632,7 +1645,7 @@ def project_is_active(
     today: date | None = None,
 ) -> bool:
     """True when the project has no end date or ``today`` is on/before it."""
-    today = today or date.today()
+    today = today or datetime.now(UTC).date()
     end = parse_wiki_date(str(project.get("ends_on") or ""))
     if end is None:
         # Also accept ISO already-normalized values from CSV/DB
@@ -1656,7 +1669,7 @@ def _parse_project_infobox(soup: BeautifulSoup) -> dict[str, str]:
             c.get_text(" ", strip=True)
             for c in tr.find_all(["th", "td"], recursive=False)
         ]
-        if len(cells) < 2:
+        if len(cells) < _MIN_PAIR:
             continue
         key = cells[0].rstrip(":").strip().lower()
         val = cells[1].strip()
@@ -1804,7 +1817,7 @@ def write_projects_catalog(
     Expired temporary projects are stored (with schedule columns) but omitted
     from the returned item→project keep map so they no longer drive Keep.
     """
-    today = today or date.today()
+    today = today or datetime.now(UTC).date()
     project_rows: list[dict[str, str]] = []
     req_rows: list[dict[str, str]] = []
     active_ids: set[str] = set()
@@ -1826,7 +1839,7 @@ def write_projects_catalog(
                 continue
             bit = f"{item_id}:{r.get('quantity')}:{item_name}"
             stage = r.get("stage")
-            if stage is not None and str(stage).strip() != "":
+            if stage is not None and str(stage).strip():
                 with contextlib.suppress(TypeError, ValueError):
                     bit = f"{bit}:{int(stage)}"
             parts.append(bit)
@@ -1867,7 +1880,7 @@ def write_projects_catalog(
                 continue
             stage_val = 0
             raw_stage = req.get("stage")
-            if raw_stage is not None and str(raw_stage).strip() != "":
+            if raw_stage is not None and str(raw_stage).strip():
                 try:
                     stage_val = int(raw_stage)
                 except (TypeError, ValueError):
@@ -2259,7 +2272,7 @@ def fetch_items_from_wiki() -> list[GameItem]:
     items: list[GameItem] = []
     for row in loot_table.find_all("tr")[1:]:
         cells = row.find_all("td")
-        if len(cells) < 4:
+        if len(cells) < _MIN_LOOT_ROW_CELLS:
             continue
 
         def get_cell(key: str, cells: Any = cells) -> Any:
@@ -2387,8 +2400,7 @@ def normalize_keep_labels(keep_for: str) -> str:
         text,
     )
     text = re.sub(r"\bCrafting(?!:)\s+", "Crafting: ", text)
-    text = re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
-    return text
+    return re.sub(r"\bAmplify(?!:)\s+", "Amplify: ", text)
 
 
 _KEEP_ENTRY_RE = re.compile(r"(.+?)\s*\((\d+)x\)")
@@ -2456,10 +2468,12 @@ def format_keep_for(
             r"(?=(?:Workshop|Quests|Projects|Research|Crafting|Amplify):)",
             wiki,
         ):
-            chunk = chunk.strip().strip(";").strip()
-            if not chunk:
+            chunk_stripped = chunk.strip().strip(";").strip()
+            if not chunk_stripped:
                 continue
-            m = re.match(r"^Projects:\s*(.*)$", chunk, re.IGNORECASE | re.DOTALL)
+            m = re.match(
+                r"^Projects:\s*(.*)$", chunk_stripped, re.IGNORECASE | re.DOTALL
+            )
             if m:
                 body = m.group(1).strip()
                 for em in _KEEP_ENTRY_RE.finditer(body):
@@ -2468,7 +2482,7 @@ def format_keep_for(
                     if _project_active(entry):
                         project_entries.append(entry)
             else:
-                preamble_parts.append(chunk)
+                preamble_parts.append(chunk_stripped)
 
     quests = quest_uses or []
     quest_entries: list[str] = []
@@ -2585,37 +2599,33 @@ def merge_action(old_action: str, new_action: str, keep_for: str) -> str:
 # =============================================================================
 
 
-def generate_action(item: GameItem) -> tuple[str, str, str]:
+def generate_action(item: GameItem) -> tuple[str, str, str]:  # ruff: ignore[too-many-branches]
+    """Decide keep/recycle/sell from category + uses (decision table; split later)."""
     has_uses = bool(item.uses.strip())
     can_recycle = bool(item.recycles_to.strip())
     category = item.category.strip()
 
     keep_for = item.uses if has_uses else ""
     recycle_for = item.recycles_to
+    action: str
 
     # Currency-like trade fodder — players sell or hold for player trading
     if item.name.strip().lower() == "assorted seeds":
-        return "Sell or keep for user trading", recycle_for, keep_for
-
-    if category == "Key":
-        return "Keep", "", "Unlocks locked areas"
-    if category == "Quick Use":
-        return (
-            ("Keep", recycle_for, keep_for)
-            if has_uses
-            else ("Use", recycle_for, "Quick Use consumable")
-        )
-    if category == "Ammunition":
-        return "Keep", "", "Ammo"
-    if category in {"Shield", "Augment", "Mods", "Weapon"}:
-        return "Keep", recycle_for, f"Equippable {category}"
-    if category == "Blueprint":
-        return (
-            "Keep",
-            recycle_for,
-            "Learn, sell, or trade to other players",
-        )
-    if category == "Research Item" or item.name.strip().lower() in _RESEARCH_ITEM_RP:
+        action = "Sell or keep for user trading"
+    elif category == "Key":
+        action, recycle_for, keep_for = "Keep", "", "Unlocks locked areas"
+    elif category == "Quick Use":
+        if has_uses:
+            action = "Keep"
+        else:
+            action, keep_for = "Use", "Quick Use consumable"
+    elif category == "Ammunition":
+        action, recycle_for, keep_for = "Keep", "", "Ammo"
+    elif category in {"Shield", "Augment", "Mods", "Weapon"}:
+        action, keep_for = "Keep", f"Equippable {category}"
+    elif category == "Blueprint":
+        action, keep_for = "Keep", "Learn, sell, or trade to other players"
+    elif category == "Research Item" or item.name.strip().lower() in _RESEARCH_ITEM_RP:
         rp_note = research_item_rp_note(item.name)
         # Preserve workshop/research-station upgrade keeps; always note RP convert
         if keep_for and rp_note.lower() not in keep_for.lower():
@@ -2623,49 +2633,48 @@ def generate_action(item: GameItem) -> tuple[str, str, str]:
         elif not keep_for:
             keep_for = rp_note
         if has_progress_keep(keep_for) and "research station" in keep_for.lower():
-            return (
-                "Keep until uses complete; then convert to research points",
-                recycle_for,
-                keep_for,
-            )
-        return "Convert to research points", recycle_for, keep_for
-    if category in MATERIAL_CATEGORIES:
-        return (
-            ("Keep", recycle_for, keep_for)
-            if has_uses
-            else ("Keep", recycle_for, f"{category} - crafting ingredient")
-        )
-    if category == "Nature":
-        return (
-            ("Keep", recycle_for, keep_for) if has_uses else ("Sell", recycle_for, "")
-        )
-    if category == "Trinket":
-        return (
-            ("Keep until uses complete; sell after", "", keep_for)
-            if has_uses
-            else ("Sell", "", "")
-        )
-    if category == "Recyclable":
+            action = "Keep until uses complete; then convert to research points"
+        else:
+            action = "Convert to research points"
+    elif category in MATERIAL_CATEGORIES:
+        action = "Keep"
+        if not has_uses:
+            keep_for = f"{category} - crafting ingredient"
+    elif category == "Nature":
         if has_uses:
-            return "Keep until uses complete; recycle after", recycle_for, keep_for
+            action = "Keep"
+        else:
+            action, keep_for = "Sell", ""
+    elif category == "Trinket":
+        recycle_for = ""
+        if has_uses:
+            action = "Keep until uses complete; sell after"
+        else:
+            action, keep_for = "Sell", ""
+    elif category == "Recyclable":
+        if has_uses:
+            action = "Keep until uses complete; recycle after"
         # Don't push Recycle/Sell — many "recyclables" (Hand Drill, …) are
         # crafting ingredients; show yield and let the player choose.
-        if can_recycle:
-            return "Crafting item", recycle_for, "Used in crafting"
-        return "Sell", "", ""
-
+        elif can_recycle:
+            action, keep_for = "Crafting item", "Used in crafting"
+        else:
+            action, recycle_for, keep_for = "Sell", "", ""
     # Retired mods/items (e.g. MetaForge ``Deprecated Anvil Splitter``)
-    if item.name.lower().startswith("deprecated "):
+    elif item.name.lower().startswith("deprecated "):
         note = keep_for or "Deprecated — sell or recycle"
         if can_recycle:
-            return "Sell or recycle", recycle_for, note
-        return "Sell", "", note
+            action, keep_for = "Sell or recycle", note
+        else:
+            action, recycle_for, keep_for = "Sell", "", note
+    elif has_uses:
+        action = "Keep"
+    elif can_recycle:
+        action, keep_for = "Crafting item", "Used in crafting"
+    else:
+        action, recycle_for, keep_for = "Sell", "", ""
 
-    if has_uses:
-        return "Keep", recycle_for, keep_for
-    if can_recycle:
-        return "Crafting item", recycle_for, "Used in crafting"
-    return "Sell", "", ""
+    return action, recycle_for, keep_for
 
 
 # =============================================================================
@@ -2820,11 +2829,11 @@ def _parse_encoded_requirements(
     """Parse ``item_id:qty:Name`` or ``item_id:qty:Name:stage`` rows."""
     out: list[tuple[str, str, int, int]] = []
     for part in (encoded or "").split("|"):
-        part = part.strip()
-        if not part:
+        part_stripped = part.strip()
+        if not part_stripped:
             continue
-        bits = part.split(":")
-        if len(bits) < 2:
+        bits = part_stripped.split(":")
+        if len(bits) < _MIN_PAIR:
             continue
         item_id = bits[0].strip()
         try:
@@ -2833,7 +2842,11 @@ def _parse_encoded_requirements(
             continue
         stage = 0
         name_bits = bits[2:]
-        if name_bits and name_bits[-1].strip().isdigit() and len(name_bits) >= 2:
+        if (
+            name_bits
+            and name_bits[-1].strip().isdigit()
+            and len(name_bits) >= _MIN_PAIR
+        ):
             try:
                 stage = int(name_bits[-1].strip())
                 name_bits = name_bits[:-1]
@@ -2871,12 +2884,12 @@ def rebuild_quests_from_csv(
                 }
             )
             for parent in (row.get("prerequisites") or "").split(";"):
-                parent = parent.strip()
-                if parent:
+                parent_id = parent.strip()
+                if parent_id:
                     prereq_rows.append(
                         {
                             "quest_id": qid,
-                            "parent_quest_id": parent,
+                            "parent_quest_id": parent_id,
                             "required_state": "COMPLETED",
                         }
                     )
@@ -3252,11 +3265,11 @@ def auto_update(*, force: bool = False) -> bool:
             f"  Database updated: {stats.items_written} items "
             f"({new_count} new, {stats.items_preserved} preserved) → {ARLO_DB.name}"
         )
-        return True
-
     except Exception as e:
         print(f"  Database update skipped (error: {e})")
         return False
+    else:
+        return True
 
 
 if __name__ == "__main__":

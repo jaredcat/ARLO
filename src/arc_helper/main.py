@@ -81,6 +81,7 @@ from arc_helper.ui.platform import apply_overlay_flags
 
 # How long the startup / post-import progress flash stays on the status pill.
 _PROGRESS_FLASH_MS = 5000
+_MAP_MISS_STREAK_HINT = 8
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -902,7 +903,7 @@ class Application:
                 self._map_pins_drawn_for_thumb = self._map_thumb.copy()
             self.map_window.set_sync_status(
                 f"no match ({self._map_miss_streak})"
-                if self._map_miss_streak < 8
+                if self._map_miss_streak < _MAP_MISS_STREAK_HINT
                 else "no match — pan slightly"
             )
             return
