@@ -227,6 +227,19 @@ def format_import_age(mtime: float | None, *, now: float | None = None) -> str:
     return f"{days}d ago"
 
 
+def parse_synced_at(value: object) -> float | None:
+    """Parse MetaForge ``lastSyncedAt`` (ISO-8601) to a Unix timestamp."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
+
+
 def account_sync_mtime(path: Path | None = None) -> float | None:
     """mtime of ``account-sync.json``, or None if missing."""
     from arc_helper.progress import _default_path
@@ -236,6 +249,38 @@ def account_sync_mtime(path: Path | None = None) -> float | None:
         return target.stat().st_mtime
     except OSError:
         return None
+
+
+def account_sync_last_synced_at(path: Path | None = None) -> float | None:
+    """Unix time of MetaForge ``lastSyncedAt`` in ``account-sync.json``."""
+    from arc_helper.progress import _default_path
+
+    target = path if path is not None else _default_path()
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return parse_synced_at(data.get("lastSyncedAt"))
+
+
+def format_progress_status(
+    *,
+    imported_mtime: float | None,
+    metaforge_synced_at: float | None = None,
+    now: float | None = None,
+) -> str:
+    """Status-pill flash for import age + MetaForge sync age."""
+    imported = format_import_age(imported_mtime, now=now)
+    if imported == "not imported":
+        return "Progress: not imported"
+    msg = f"Progress: imported {imported}"
+    if metaforge_synced_at is not None:
+        synced = format_import_age(metaforge_synced_at, now=now)
+        if synced != "not imported":
+            msg += f" · MetaForge synced {synced}"
+    return msg
 
 
 def _cors_headers(handler: BaseHTTPRequestHandler) -> None:

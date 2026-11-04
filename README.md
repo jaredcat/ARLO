@@ -226,7 +226,7 @@ GitHub README pages cannot host `javascript:` bookmarklets, so the drag target l
 3. Drag **Export to ARLO** onto your bookmarks bar (Chrome or Firefox).
 4. On [MetaForge](https://metaforge.app/arc-raiders/raider-profile), Sync your profile, then click the bookmark.
 
-ARLO writes `account-sync.json` next to the app and hot-reloads progress (no restart). On launch the status pill flashes **Progress: imported …** for a few seconds. If ARLO is not running, the bookmark downloads `account-sync.json` instead — place it next to the app or run `uv run arc-import-progress import account-sync.json`.
+ARLO writes `account-sync.json` next to the app and hot-reloads progress (no restart). On launch the status pill flashes **Progress: imported … · MetaForge synced …** for a few seconds. If ARLO is not running, the bookmark downloads `account-sync.json` instead — place it next to the app or run `uv run arc-import-progress import account-sync.json`.
 
 Prerequisite: MetaForge must already be synced; ARLO only imports that snapshot.
 

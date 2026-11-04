@@ -67,29 +67,30 @@ class StatusWindow(QWidget):
         else:
             super().mousePressEvent(event)
 
+    def _set_status(self, text: str, *, color: str) -> None:
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(f"color: {color}; background: {BG_DARK};")
+        # Shrink/grow to the new label — otherwise a long progress flash leaves
+        # a wide empty pill after returning to Scanning.
+        self.adjustSize()
+
     def set_scanning(self) -> None:
-        self.status_label.setText("\u25cf Scanning... (F8=filters)")
-        self.status_label.setStyleSheet(f"color: #888888; background: {BG_DARK};")
+        self._set_status("\u25cf Scanning...", color="#888888")
 
     def set_active(self) -> None:
-        self.status_label.setText("\u25cf INVENTORY")
-        self.status_label.setStyleSheet(f"color: #32CD32; background: {BG_DARK};")
+        self._set_status("\u25cf INVENTORY", color="#32CD32")
 
     def set_map(self) -> None:
-        self.status_label.setText("\u25cf MAP (F8=filters)")
-        self.status_label.setStyleSheet(f"color: #2DD4BF; background: {BG_DARK};")
+        self._set_status("\u25cf MAP (F8=filters)", color="#2DD4BF")
 
     def set_hotkey(self) -> None:
-        self.status_label.setText("\u25cf HOTKEY SCAN")
-        self.status_label.setStyleSheet(f"color: #FFD700; background: {BG_DARK};")
+        self._set_status("\u25cf HOTKEY SCAN", color="#FFD700")
 
     def set_error(self, message: str) -> None:
-        self.status_label.setText(f"\u25cf {message}")
-        self.status_label.setStyleSheet(f"color: #FF4444; background: {BG_DARK};")
+        self._set_status(f"\u25cf {message}", color="#FF4444")
 
     def set_info(self, message: str, *, fg: str = "#5AD4A0") -> None:
-        self.status_label.setText(f"\u25cf {message}")
-        self.status_label.setStyleSheet(f"color: {fg}; background: {BG_DARK};")
+        self._set_status(f"\u25cf {message}", color=fg)
 
     def hide(self) -> None:
         QWidget.hide(self)

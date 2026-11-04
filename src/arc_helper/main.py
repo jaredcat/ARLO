@@ -59,8 +59,10 @@ from arc_helper.progress import apply_progress
 from arc_helper.progress import load_progress
 from arc_helper.progress_import_server import IMPORT_HOST
 from arc_helper.progress_import_server import IMPORT_PORT
+from arc_helper.progress_import_server import account_sync_last_synced_at
 from arc_helper.progress_import_server import account_sync_mtime
-from arc_helper.progress_import_server import format_import_age
+from arc_helper.progress_import_server import format_progress_status
+from arc_helper.progress_import_server import parse_synced_at
 from arc_helper.progress_import_server import start_import_server
 from arc_helper.progress_import_server import stop_import_server
 from arc_helper.projects import ProjectCatalog
@@ -540,7 +542,13 @@ class Application:
             len(profile.completed_quests),
             len(profile.workshop_levels),
         )
-        self._flash_progress_status("Progress: imported just now")
+        synced = parse_synced_at(profile.metaforge_synced_at)
+        self._flash_progress_status(
+            format_progress_status(
+                imported_mtime=time.time(),
+                metaforge_synced_at=synced,
+            )
+        )
 
     def _flash_progress_status(self, message: str) -> None:
         """Show an info line on the status pill, then return to Scanning."""
@@ -987,12 +995,13 @@ class Application:
         # Start the main-thread UI pump
         self._ui_pump_timer.start(50)
 
-        # Brief progress-import flash on startup (mtime of account-sync.json).
-        age = format_import_age(account_sync_mtime())
-        if age == "not imported":
-            self._flash_progress_status("Progress: not imported")
-        else:
-            self._flash_progress_status(f"Progress: imported {age}")
+        # Brief progress-import flash on startup (file mtime + MetaForge sync).
+        self._flash_progress_status(
+            format_progress_status(
+                imported_mtime=account_sync_mtime(),
+                metaforge_synced_at=account_sync_last_synced_at(),
+            )
+        )
 
         try:
             self.app.exec()

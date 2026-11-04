@@ -40,6 +40,8 @@ class ProgressProfile(BaseModel):
     source: str = "metaforge-account-sync"
     account_id: str | None = None
     imported_at: str | None = None
+    # Top-level MetaForge ``lastSyncedAt`` from the account-sync payload
+    metaforge_synced_at: str | None = None
     # Quest keys are slugified titles / MetaForge quest_ids (e.g. "clearer-skies")
     completed_quests: set[str] = Field(default_factory=set)
     # Display-ish station names lowercased → current level
@@ -115,10 +117,12 @@ def import_account_sync(raw: dict[str, Any] | str | Path) -> ProgressProfile:
         data = raw
 
     resources = data.get("resources") or {}
+    synced_raw = data.get("lastSyncedAt")
     profile = ProgressProfile(
         source="metaforge-account-sync",
         account_id=data.get("accountId"),
         imported_at=datetime.now(UTC).isoformat(),
+        metaforge_synced_at=str(synced_raw) if synced_raw else None,
     )
 
     # Quests ---------------------------------------------------------------

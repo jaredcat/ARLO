@@ -26,11 +26,11 @@ Alien Duck,Sell,,,1000,15
 Alpine Wardrobe,Sell,,,,
 Alpine Wardrobe Design,Sell,,,5000,1
 Alpino (Outfit),Sell,,,,
-Amplification Module MK. I,Keep,,Crafting: Amplify common Tier IV weapon (1x),7000,1
-Amplification Module MK. II,Keep,,Crafting: Amplify uncommon Tier IV weapon (1x),7000,1
-Amplification Module MK. III,Keep,,Crafting: Amplify rare Tier IV weapon (1x),7000,1
-Amplification Module MK. IV,Keep,,Crafting: Amplify epic Tier IV weapon (1x),7000,1
-Amplification Module MK. V,Keep,,Crafting: Amplify legendary Tier IV weapon (1x),7000,1
+Amplification Module MK. I,Keep,,Crafting:; Amplify: common Tier IV weapon (1x),7000,1
+Amplification Module MK. II,Keep,,Crafting:; Amplify: uncommon Tier IV weapon (1x),7000,1
+Amplification Module MK. III,Keep,,Crafting:; Amplify: rare Tier IV weapon (1x),7000,1
+Amplification Module MK. IV,Keep,,Crafting:; Amplify: epic Tier IV weapon (1x),7000,1
+Amplification Module MK. V,Keep,,Crafting:; Amplify: legendary Tier IV weapon (1x),7000,1
 Amplified Anvil,Keep,,Equippable Weapon,20800,1
 Amplified Anvil (Anvil Splitter),Keep,,Equippable Weapon,20800,1
 Amplified Anvil (X-Rounds),Keep,,Equippable Weapon,20800,1
@@ -853,7 +853,7 @@ Macrame (Outfit),Sell,,,,
 Maestro (Outfit),Sell,,,,
 Magazine Geometry 101,Sell,,,,1
 Magnet,Keep,2x Metal Parts,Projects: Expedition 5 (15x),300,15
-Magnetic Accelerator,Keep,"1x Advanced Mechanical Components, 1x ARC Motion Core","Workshop: Gunsmith 3 (3x); Projects: Expedition 1 (3x), Expedition 5 (3x), Trophy Display 4 (10x); Crafting: Dolabra (3x)",5500,3
+Magnetic Accelerator,Keep,"1x Advanced Mechanical Components, 1x ARC Motion Core","Workshop: Gunsmith 3 (3x); Crafting: Dolabra (3x); Projects: Expedition 1 (3x), Expedition 5 (3x), Trophy Display 4 (10x)",5500,3
 Magnetron,Keep until uses complete; recycle after,"1x Magnetic Accelerator, 1x Steel Spring",Quests: Snap And Salvage (1x),6000,3
 Mailbox (Backpack Attachment),Sell,,,,
 Major Aiva's Mementos,Keep until uses complete; sell after,,Quests: The Major’s Footlocker (1x),100,1
@@ -1189,7 +1189,7 @@ Shotgun Silencer Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1
 Showstopper,Use,"2x Battery, 1x Electrical Components",Quick Use consumable,2100,5
 Showstopper Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1
 Shrapnel Grenade,Use,"1x Crude Explosives, 1x Metal Parts",Quick Use consumable,800,5
-Shredder Gyro,Keep until uses complete; recycle after,"3x ARC Alloy, 3x Mechanical Components","Research: Il Toro Blueprint (5x); Projects: Expedition 2 (10x), Trophy Display 3 (5x); Crafting: Dolabra (3x)",2000,3
+Shredder Gyro,Keep until uses complete; recycle after,"3x ARC Alloy, 3x Mechanical Components","Research: Il Toro Blueprint (5x); Crafting: Dolabra (3x); Projects: Expedition 2 (10x), Trophy Display 3 (5x)",2000,3
 Sideburns (Facial Hair),Sell,,,,
 Sidecut Dreads (Hair),Sell,,,,
 Signal Amplifier,Crafting item,"2x Electrical Components, 2x Voltage Converter",Used in crafting,3000,3
@@ -1427,7 +1427,7 @@ Urchin Harvester (Backpack),Sell,,,,
 Valente (Outfit),Sell,,,,
 Vanguard (Outfit),Sell,,,,
 Vanguard Helmet (Scrappy Outfit),Sell,,,,
-Vaporizer Regulator,Keep until uses complete; recycle after,"1x Advanced Electrical Components, 2x ARC Circuitry",Projects: Expedition 4 (3x); Crafting: Dolabra (2x),6000,3
+Vaporizer Regulator,Keep until uses complete; recycle after,"1x Advanced Electrical Components, 2x ARC Circuitry",Crafting: Dolabra (2x); Projects: Expedition 4 (3x),6000,3
 Vase,Sell,,,3000,3
 Velati (Outfit),Sell,,,,
 Venator Blueprint,Keep,,"Learn, sell, or trade to other players",5000,1

@@ -25,6 +25,7 @@ def test_import_account_sync_quests_workshop_projects():
     profile = import_account_sync(FIXTURE)
 
     assert profile.account_id == "4280071038815716698"
+    assert profile.metaforge_synced_at == "2026-10-29T08:46:50.19+00:00"
     assert "clearer-skies" in profile.completed_quests
     assert "the-trifecta" in profile.completed_quests
     assert "collision-course" in profile.completed_quests
