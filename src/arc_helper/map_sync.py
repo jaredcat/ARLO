@@ -36,7 +36,6 @@ _TEAL_V_LOW = 80
 _MIN_MARKER_AREA = 20
 _MAX_MARKER_ASPECT = 4.0
 _EPS = 1e-6
-_MAX_ROTATION_DEG = 180.0
 _MIN_ORB_MATCHES = 8
 _MIN_KNN_PAIR = 2
 _MIN_INLIER_RATIO = 0.15
@@ -171,43 +170,114 @@ def find_teal_player(
     return best
 
 
-def affine_orientation_ok(
-    affine: np.ndarray,
-    *,
-    max_rotation_deg: float = 25.0,
-) -> bool:
-    """True when the similarity looks like upright pan/zoom (not a 180° flip).
+def _fit_positive_scale_translation(
+    src: np.ndarray,
+    dst: np.ndarray,
+) -> tuple[float, float, float] | None:
+    """Least squares ``dst ≈ s·src + t`` with ``s > 0`` (no rotation)."""
+    if src.shape[0] < 2:
+        return None
+    p_mean = src.mean(axis=0)
+    q_mean = dst.mean(axis=0)
+    pc = src - p_mean
+    qc = dst - q_mean
+    denom = float(np.dot(pc.ravel(), pc.ravel()))
+    if denom < _EPS:
+        return None
+    scale = float(np.dot(pc.ravel(), qc.ravel()) / denom)
+    if scale <= _EPS:
+        return None
+    translation = q_mean - scale * p_mean
+    return scale, float(translation[0]), float(translation[1])
 
-    The in-game map never rotates; ORB on snow/terrain can still lock onto an
-    upside-down match and make every pin look 180° wrong.
+
+def estimate_upright_scale_translation(
+    src: np.ndarray,
+    dst: np.ndarray,
+    *,
+    reproj_thresh: float = 5.0,
+    max_iters: int = 80,
+    min_inliers: int = 6,
+) -> tuple[np.ndarray, float] | None:
+    """RANSAC scale+translation. The raid map does not rotate or flip.
+
+    Returns ``(2x3 affine, inlier_ratio)`` mapping ``src`` → ``dst``, or None.
+    A half-turn correspondence has negative scale and is not a candidate.
     """
-    a = float(affine[0, 0])
-    b = float(affine[0, 1])
-    c = float(affine[1, 0])
-    d = float(affine[1, 1])
-    # Partial affine is s·R: reject reflections (negative determinant).
-    det = a * d - b * c
-    if det <= 0:
-        return False
-    scale = math.hypot(a, c)
-    if scale < _EPS:
-        return False
-    # θ from [[s cos, -s sin], [s sin, s cos]]
-    angle_deg = math.degrees(math.atan2(c, a))
-    while angle_deg > _MAX_ROTATION_DEG:
-        angle_deg -= 360.0
-    while angle_deg < -_MAX_ROTATION_DEG:
-        angle_deg += 360.0
-    return abs(angle_deg) <= max_rotation_deg
+    src_pts = np.asarray(src, dtype=np.float64).reshape(-1, 2)
+    dst_pts = np.asarray(dst, dtype=np.float64).reshape(-1, 2)
+    count = src_pts.shape[0]
+    if count < 2 or dst_pts.shape[0] != count:
+        return None
+
+    rng = np.random.default_rng()
+    best_mask: np.ndarray | None = None
+    best_count = 0
+    early = int(count * 0.85)
+    for _ in range(max_iters):
+        i, j = rng.choice(count, size=2, replace=False)
+        sample = _fit_positive_scale_translation(src_pts[[i, j]], dst_pts[[i, j]])
+        if sample is None:
+            continue
+        scale, tx, ty = sample
+        if scale < 0.05 or scale > 40.0:
+            continue
+        err = np.hypot(
+            scale * src_pts[:, 0] + tx - dst_pts[:, 0],
+            scale * src_pts[:, 1] + ty - dst_pts[:, 1],
+        )
+        mask = err <= reproj_thresh
+        hits = int(mask.sum())
+        if hits > best_count:
+            best_count = hits
+            best_mask = mask
+            if hits >= early:
+                break
+    if best_mask is None or best_count < min_inliers:
+        return None
+
+    fitted = _fit_positive_scale_translation(src_pts[best_mask], dst_pts[best_mask])
+    if fitted is None:
+        return None
+    scale, tx, ty = fitted
+    err = np.hypot(
+        scale * src_pts[:, 0] + tx - dst_pts[:, 0],
+        scale * src_pts[:, 1] + ty - dst_pts[:, 1],
+    )
+    inliers = int((err <= reproj_thresh).sum())
+    if inliers < min_inliers:
+        return None
+    affine = np.array([[scale, 0.0, tx], [0.0, scale, ty]], dtype=np.float64)
+    return affine, inliers / count
+
+
+def _orb_upright(detector: object, gray: np.ndarray):
+    """ORB keypoints with orientation fixed at 0°.
+
+    Default ORB rotates each patch to the keypoint angle, so a 180° patch can
+    still match. The raid map has one orientation; upright descriptors skip
+    that search and reject flipped terrain.
+    """
+    detect = getattr(detector, "detect", None)
+    compute = getattr(detector, "compute", None)
+    if detect is None or compute is None:
+        return [], None
+    keypoints = detect(gray, None)
+    if not keypoints:
+        return [], None
+    for kp in keypoints:
+        kp.angle = 0.0
+    return compute(gray, keypoints)
 
 
 def register_viewport_to_reference(
     viewport: Image.Image,
     reference: Image.Image,
 ) -> tuple[np.ndarray, float] | None:
-    """Estimate similarity transform mapping viewport px → reference px.
+    """Estimate upright scale+translation mapping viewport px → reference px.
 
-    Returns (2x3 affine matrix, inlier_ratio) or None.
+    The raid map does not rotate. Returns (2x3 affine matrix, inlier_ratio)
+    or None.
     """
     try:
         import cv2
@@ -234,8 +304,8 @@ def register_viewport_to_reference(
     if orb_create is None:
         return None
     detector = orb_create(4000)
-    kp1, des1 = detector.detectAndCompute(vp, None)
-    kp2, des2 = detector.detectAndCompute(ref, None)
+    kp1, des1 = _orb_upright(detector, vp)
+    kp2, des2 = _orb_upright(detector, ref)
     if (
         des1 is None
         or des2 is None
@@ -256,36 +326,18 @@ def register_viewport_to_reference(
     if len(good) < _MIN_ORB_MATCHES:
         return None
 
-    src = np.array([kp1[m.queryIdx].pt for m in good], dtype=np.float32).reshape(
-        -1, 1, 2
-    )
-    dst = np.array([kp2[m.trainIdx].pt for m in good], dtype=np.float32).reshape(
-        -1, 1, 2
-    )
-    # Runtime may return None; stubs type the matrix as always present.
-    affine, inliers = cv2.estimateAffinePartial2D(
-        src, dst, method=cv2.RANSAC, ransacReprojThreshold=5.0
-    )
-    if affine is None or inliers is None:  # pyright: ignore[reportUnnecessaryComparison]
+    src = np.array([kp1[m.queryIdx].pt for m in good], dtype=np.float64)
+    dst = np.array([kp2[m.trainIdx].pt for m in good], dtype=np.float64)
+    fitted = estimate_upright_scale_translation(src, dst)
+    if fitted is None:
         return None
-    ratio = float(inliers.sum()) / float(len(inliers))
+    affine, ratio = fitted
     if ratio < _MIN_INLIER_RATIO:
         return None
 
-    # Undo reference downscale in the transform
+    # Undo reference downscale in the transform (vp → scaled_ref → full_ref).
     if not math.isclose(scale_ref, 1.0):
-        s = 1.0 / scale_ref
-        # maps vp → scaled_ref; we want vp → full_ref
-        affine = affine.astype(np.float64)
-        affine[0, :] *= s
-        affine[1, :] *= s
-
-    if not affine_orientation_ok(affine):
-        logger.info(
-            "Map register: rejected flipped/rotated affine "
-            "(det/angle looks like upside-down match)"
-        )
-        return None
+        affine = affine * (1.0 / scale_ref)
 
     return affine, ratio
 

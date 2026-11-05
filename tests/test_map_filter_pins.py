@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from arc_helper.map_data import MapMarker
 from arc_helper.map_data import MapMeta
@@ -27,19 +28,33 @@ def test_invert_affine_round_trip():
     assert abs(vy - 7.0) < 1e-6
 
 
-def test_affine_orientation_rejects_upside_down():
-    from arc_helper.map_sync import affine_orientation_ok
+def test_upright_scale_translation_recovers_pan_zoom():
+    from arc_helper.map_sync import estimate_upright_scale_translation
 
-    upright = np.array([[1.5, 0.0, 10.0], [0.0, 1.5, 20.0]], dtype=np.float64)
-    assert affine_orientation_ok(upright)
+    rng = np.random.default_rng(0)
+    src = rng.uniform(0.0, 200.0, size=(40, 2))
+    scale, tx, ty = 1.7, 12.0, -4.0
+    dst = scale * src + np.array([tx, ty])
+    dst[0] = (0.0, 0.0)  # one outlier
+    fitted = estimate_upright_scale_translation(src, dst)
+    assert fitted is not None
+    affine, ratio = fitted
+    assert affine[0, 0] == pytest.approx(scale, abs=0.05)
+    assert affine[1, 1] == pytest.approx(scale, abs=0.05)
+    assert affine[0, 1] == 0.0
+    assert affine[1, 0] == 0.0
+    assert affine[0, 2] == pytest.approx(tx, abs=1.0)
+    assert affine[1, 2] == pytest.approx(ty, abs=1.0)
+    assert ratio > 0.8
 
-    # 180° rotation: cos=-1, sin=0 → [[-s,0],[0,-s]]
-    flipped = np.array([[-1.5, 0.0, 10.0], [0.0, -1.5, 20.0]], dtype=np.float64)
-    assert not affine_orientation_ok(flipped)
 
-    # Reflection (det < 0)
-    mirrored = np.array([[1.5, 0.0, 0.0], [0.0, -1.5, 0.0]], dtype=np.float64)
-    assert not affine_orientation_ok(mirrored)
+def test_upright_scale_translation_rejects_half_turn():
+    from arc_helper.map_sync import estimate_upright_scale_translation
+
+    rng = np.random.default_rng(1)
+    src = rng.uniform(0.0, 200.0, size=(30, 2))
+    dst = -1.5 * src + np.array([80.0, 40.0])
+    assert estimate_upright_scale_translation(src, dst, reproj_thresh=3.0) is None
 
 
 def test_latlng_to_screen_projects_into_viewport():

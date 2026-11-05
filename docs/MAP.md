@@ -55,7 +55,7 @@ Searching an **item** (e.g. Radial Press, Steel Spring) highlights every pin who
 
 1. Open the raid **MAP** screen (any zoom/pan).
 2. A fast loop (~6 Hz) watches a deep-inset grayscale thumbnail of the viewport for movement (hover tooltips alone should not clear pins).
-3. Sustained pan/zoom hides pins. After the map settles (~400 ms debounce), ARLO runs ORB once (rejecting upside-down matches — the raid map never rotates) and draws pins on Windows/X11; Wayland keeps pins in F8 only.
+3. Sustained pan/zoom hides pins. After the map settles (~400 ms debounce), ARLO runs upright ORB once (scale and pan only — the raid map never rotates) and draws pins on Windows/X11; Wayland keeps pins in F8 only.
 
 Limitations (same class as Metaforge’s overlay):
 

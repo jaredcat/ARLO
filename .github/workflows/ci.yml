@@ -1,11 +1,11 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-      - dev
+  # Gate PRs into main (and any other branch). Direct pushes to main are
+  # blocked by branch protection; release.yml re-runs this via workflow_call.
   pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read

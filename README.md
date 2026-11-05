@@ -333,7 +333,7 @@ uv run basedpyright
 uv run pytest
 ```
 
-CI on PRs and pushes to `main`/`dev` runs the same gate: Ruff lint, Ruff format check, basedpyright, and pytest.
+CI (Ruff lint/format, basedpyright, pytest) runs on every PR. Pushes to `main`/`dev` run the same checks inside the Release workflow and only publish a release if they pass. `main` is PR-only (branch protection); `dev` allows direct pushes.
 
 ### Item Database
 

@@ -6,10 +6,13 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtGui import QFont
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QLabel
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPaintEvent
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QWidget
 
 from arc_helper.config import get_dpi_scale
@@ -34,28 +37,60 @@ class StatusWindow(QWidget):
         self.on_quit = on_quit
         self.on_left_click = on_left_click
         self.dpi_scale = get_dpi_scale()
+        self._text = "\u25cf Scanning..."
+        self._color = QColor("#888888")
+        self._bg = QColor(BG_DARK)
 
         # Status pill accepts clicks (left = F8, right = quit).
         apply_overlay_flags(self, click_through=False)
         self.setWindowTitle("ARLO Status")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, on=False)
+        # Partial stylesheet updates do not clear an override-redirect
+        # XWayland window when it shrinks. Paint every pixel ourselves.
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, on=True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, on=True)
+        self.setFont(QFont("Segoe UI", self._scale(10)))
         self.move(10, 10)
-        self._setup_ui()
+        self._apply_size()
         self.show()
 
     def _scale(self, value: int) -> int:
         return max(1, int(value / max(self.dpi_scale, 1.0)))
 
-    def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(
-            self._scale(10), self._scale(5), self._scale(10), self._scale(5)
+    def _apply_size(self) -> None:
+        metrics = QFontMetrics(self.font())
+        pad_x = self._scale(10)
+        pad_y = self._scale(5)
+        # +2 so the last glyph's right bearing is not clipped.
+        width = metrics.horizontalAdvance(self._text) + pad_x * 2 + 2
+        height = metrics.height() + pad_y * 2
+        self.setFixedSize(max(1, width), max(1, height))
+
+    def paintEvent(self, _event: QPaintEvent) -> None:  # ruff: ignore[invalid-function-name]
+        painter = QPainter(self)
+        # Source replaces the backing store. SourceOver would blend the new
+        # background over leftover MAP ink on XWayland.
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), self._bg)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setFont(self.font())
+        painter.setPen(self._color)
+        pad_x = self._scale(10)
+        pad_y = self._scale(5)
+        painter.drawText(
+            self.rect().adjusted(pad_x, pad_y, -pad_x, -pad_y),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            self._text,
         )
-        self.setStyleSheet(f"background: {BG_DARK};")
-        self.status_label = QLabel("\u25cf Scanning...")
-        self.status_label.setFont(QFont("Segoe UI", self._scale(10)))
-        self.status_label.setStyleSheet(f"color: #888888; background: {BG_DARK};")
-        layout.addWidget(self.status_label)
+        painter.end()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # ruff: ignore[invalid-function-name]
+        super().resizeEvent(event)
+        # Shrink does not expose the surviving area of an override-redirect
+        # window, so ask the platform for a full update of the new size.
+        # Nothing is on screen until show(), and the native handle is null then.
+        if self.isVisible():
+            self.windowHandle().requestUpdate()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # ruff: ignore[invalid-function-name]
         # Defer quit/toggle so cleanup is not nested inside the mouse handler
@@ -68,11 +103,10 @@ class StatusWindow(QWidget):
             super().mousePressEvent(event)
 
     def _set_status(self, text: str, *, color: str) -> None:
-        self.status_label.setText(text)
-        self.status_label.setStyleSheet(f"color: {color}; background: {BG_DARK};")
-        # Shrink/grow to the new label — otherwise a long progress flash leaves
-        # a wide empty pill after returning to Scanning.
-        self.adjustSize()
+        self._text = text
+        self._color = QColor(color)
+        self._apply_size()
+        self.repaint(self.rect())
 
     def set_scanning(self) -> None:
         self._set_status("\u25cf Scanning...", color="#888888")
