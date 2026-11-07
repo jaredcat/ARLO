@@ -41,8 +41,8 @@ def test_upright_scale_translation_recovers_pan_zoom():
     affine, ratio = fitted
     assert affine[0, 0] == pytest.approx(scale, abs=0.05)
     assert affine[1, 1] == pytest.approx(scale, abs=0.05)
-    assert affine[0, 1] == 0.0
-    assert affine[1, 0] == 0.0
+    assert affine[0, 1] == pytest.approx(0.0)
+    assert affine[1, 0] == pytest.approx(0.0)
     assert affine[0, 2] == pytest.approx(tx, abs=1.0)
     assert affine[1, 2] == pytest.approx(ty, abs=1.0)
     assert ratio > 0.8

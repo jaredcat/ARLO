@@ -8,6 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -38,6 +39,9 @@ _MAX_MARKER_ASPECT = 4.0
 _EPS = 1e-6
 _MIN_ORB_MATCHES = 8
 _MIN_KNN_PAIR = 2
+_MIN_SCALE_POINTS = 2
+_MIN_RANSAC_SCALE = 0.05
+_MAX_RANSAC_SCALE = 40.0
 _MIN_INLIER_RATIO = 0.15
 _VIEWPORT_MARGIN_PX = 20
 _NORM_LOOSE_MIN = -0.2
@@ -175,7 +179,7 @@ def _fit_positive_scale_translation(
     dst: np.ndarray,
 ) -> tuple[float, float, float] | None:
     """Least squares ``dst ≈ s·src + t`` with ``s > 0`` (no rotation)."""
-    if src.shape[0] < 2:
+    if src.shape[0] < _MIN_SCALE_POINTS:
         return None
     p_mean = src.mean(axis=0)
     q_mean = dst.mean(axis=0)
@@ -207,7 +211,7 @@ def estimate_upright_scale_translation(
     src_pts = np.asarray(src, dtype=np.float64).reshape(-1, 2)
     dst_pts = np.asarray(dst, dtype=np.float64).reshape(-1, 2)
     count = src_pts.shape[0]
-    if count < 2 or dst_pts.shape[0] != count:
+    if count < _MIN_SCALE_POINTS or dst_pts.shape[0] != count:
         return None
 
     rng = np.random.default_rng()
@@ -215,12 +219,12 @@ def estimate_upright_scale_translation(
     best_count = 0
     early = int(count * 0.85)
     for _ in range(max_iters):
-        i, j = rng.choice(count, size=2, replace=False)
+        i, j = rng.choice(count, size=_MIN_SCALE_POINTS, replace=False)
         sample = _fit_positive_scale_translation(src_pts[[i, j]], dst_pts[[i, j]])
         if sample is None:
             continue
         scale, tx, ty = sample
-        if scale < 0.05 or scale > 40.0:
+        if scale < _MIN_RANSAC_SCALE or scale > _MAX_RANSAC_SCALE:
             continue
         err = np.hypot(
             scale * src_pts[:, 0] + tx - dst_pts[:, 0],
@@ -251,7 +255,7 @@ def estimate_upright_scale_translation(
     return affine, inliers / count
 
 
-def _orb_upright(detector: object, gray: np.ndarray):
+def _orb_upright(detector: object, gray: np.ndarray) -> tuple[Any, Any]:
     """ORB keypoints with orientation fixed at 0°.
 
     Default ORB rotates each patch to the keypoint angle, so a 180° patch can
@@ -337,7 +341,7 @@ def register_viewport_to_reference(
 
     # Undo reference downscale in the transform (vp → scaled_ref → full_ref).
     if not math.isclose(scale_ref, 1.0):
-        affine = affine * (1.0 / scale_ref)
+        affine *= 1.0 / scale_ref
 
     return affine, ratio
 
