@@ -19,6 +19,12 @@ dist
 .pytest_cache/
 .mypy_cache/
 
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 !.env.example
 .last_wiki_update
 .screencast_restore_token
