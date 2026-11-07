@@ -671,7 +671,7 @@ class MapSyncEngine:
         rw: int,
         rh: int,
         map_id: str,
-        meta: object,
+        meta: MapMeta,
     ) -> PlayerFix | None:
         """Detect player arrow and return a PlayerFix if on-basemap."""
         found = self._find_player_in_viewport(full, viewport, bbox)

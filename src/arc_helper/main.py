@@ -41,6 +41,8 @@ from arc_helper.hotkey import TapHotkeyMonitor
 from arc_helper.hotkey import get_hotkey_monitor
 from arc_helper.hotkey import get_map_find_tap_monitor
 from arc_helper.hotkey import get_map_tap_monitor
+from arc_helper.map_data import MapMarker
+from arc_helper.map_data import MapMeta
 from arc_helper.map_data import get_map_catalog
 from arc_helper.map_filter import MapFilterState
 from arc_helper.map_filter import resolve_markers
@@ -221,7 +223,9 @@ class Scanner:
         """Resume scanning."""
         self.state = ScannerState.IDLE
 
-    def _idle_phase(self, *, hotkey_now: bool, ocr: object, settings: object) -> bool:
+    def _idle_phase(
+        self, *, hotkey_now: bool, ocr: OCREngine, settings: Settings
+    ) -> bool:
         """Handle IDLE phase; return True to ``continue`` the outer loop."""
         if MapSyncEngine.detect_map_open():
             self._update_status("map")
@@ -260,7 +264,7 @@ class Scanner:
         return False
 
     def _active_check_exit(
-        self, *, hotkey_now: bool, ocr: object, settings: object
+        self, *, hotkey_now: bool, ocr: OCREngine, settings: Settings
     ) -> bool:
         """Check whether to leave ACTIVE mode; return True to ``continue``."""
         if self._hotkey_override:
@@ -280,17 +284,17 @@ class Scanner:
                     return True
         return False
 
-    def _active_scan_step(self, ocr: object, settings: object) -> None:
+    def _active_scan_step(self, ocr: OCREngine, settings: Settings) -> None:
         """Perform one tooltip scan in ACTIVE state and sleep the scan interval."""
-        item_name = ocr.extract_item_name_at_cursor()  # type: ignore[union-attr]
+        item_name = ocr.extract_item_name_at_cursor()
         self.stats.tooltip_scans += 1
         if item_name:
             self._handle_detected_item(item_name)
         else:
             self._handle_empty_tooltip()
-        time.sleep(settings.scan.tooltip_scan_interval)  # type: ignore[union-attr]
+        time.sleep(settings.scan.tooltip_scan_interval)
 
-    def _scan_tick(self, ocr: object, settings: object) -> bool:
+    def _scan_tick(self, ocr: OCREngine, settings: Settings) -> bool:
         """One scanner iteration. Return False to stop the loop."""
         if self.state == ScannerState.PAUSED:
             time.sleep(0.1)
@@ -773,9 +777,9 @@ class Application:
 
     @staticmethod
     def _project_candidates_to_pins(
-        candidates: list,
+        candidates: list[MapMarker],
         reg: ViewportRegistration,
-        meta: object,
+        meta: MapMeta,
         cap: int,
     ) -> list[OverlayPin]:
         """Project map markers to on-screen overlay pin coords."""

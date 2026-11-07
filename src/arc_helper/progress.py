@@ -161,7 +161,7 @@ def _import_projects(profile: ProgressProfile, resources: dict) -> None:
         bucket[item_slug] = _merge_project_item_state(bucket.get(item_slug, ""), state)
 
 
-def _add_blueprint_ids(out: set[str], items: list, key: str) -> None:
+def _add_blueprint_ids(out: set[str], items: list | None, key: str) -> None:
     """Append the ``key`` field of each dict entry in ``items`` to ``out``."""
     for item in items or []:
         if isinstance(item, dict) and item.get(key):
@@ -171,11 +171,24 @@ def _add_blueprint_ids(out: set[str], items: list, key: str) -> None:
 def _import_blueprints(profile: ProgressProfile, resources: dict) -> None:
     """Add owned blueprint / design / stencil ids from blueprints block."""
     bp_block = (resources.get("blueprints") or {}).get("data") or {}
+    blueprints = bp_block.get("blueprints")
+    designs = bp_block.get("designs")
+    stencils = bp_block.get("stencils")
     _add_blueprint_ids(
-        profile.owned_blueprints, bp_block.get("blueprints"), "blueprintId"
+        profile.owned_blueprints,
+        blueprints if isinstance(blueprints, list) else None,
+        "blueprintId",
     )
-    _add_blueprint_ids(profile.owned_blueprints, bp_block.get("designs"), "itemId")
-    _add_blueprint_ids(profile.owned_blueprints, bp_block.get("stencils"), "itemId")
+    _add_blueprint_ids(
+        profile.owned_blueprints,
+        designs if isinstance(designs, list) else None,
+        "itemId",
+    )
+    _add_blueprint_ids(
+        profile.owned_blueprints,
+        stencils if isinstance(stencils, list) else None,
+        "itemId",
+    )
 
 
 def import_account_sync(raw: dict[str, Any] | str | Path) -> ProgressProfile:
