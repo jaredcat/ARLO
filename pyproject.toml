@@ -31,6 +31,7 @@ dev = [
     "pytest>=8.0",
     "basedpyright>=1.40.2",
     "pre-commit>=4.7.0",
+    "pytest-cov>=7.1.0",
 ]
 # Kept as a no-op alias so older docs / `uv sync --extra wayland` still work.
 wayland = []
@@ -211,6 +212,27 @@ reportMissingTypeArgument = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+# Repo root as source root so Cobertura filenames are
+# `src/arc_helper/...` / `update_db.py` (matches sonar.sources).
+source = ["."]
+branch = true
+relative_files = true
+include = ["src/arc_helper/*", "src/arc_helper/**/*", "update_db.py"]
+omit = [
+  "tests/*",
+  "*/tests/*",
+  ".venv/*",
+  "build.py",
+  "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+]
 
 # Static metadata so uv never builds the PyGObject sdist at lock time
 # (PyGObject ships sdist-only; building requires Linux system headers).
